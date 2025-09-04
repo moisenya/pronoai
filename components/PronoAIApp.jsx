@@ -2,26 +2,22 @@ import React, { useEffect, useMemo, useState } from "react";
 import { ResponsiveContainer, AreaChart, Area } from "recharts";
 
 /**
- * PronoAI (Single-file React + Tailwind)
- *
- * - Accueil épuré façon Apple (vert/noir/gris), cartes 3D + blur
- * - 9 pronos quotidiens (3 Football, 3 Tennis, 3 Basket) avec analyse + confiance
- * - Section "Pronos validés d'hier"
- * - Newsletter (localStorage + endpoint configurable)
+ * PronoAI - App complète (React + Tailwind) avec :
+ * - Logo cliquable (refresh)
+ * - 9 pronos / jour (Football, Tennis, Basket)
+ * - Badge "Nouveau" (<30 min) basé sur created_at (DB)
+ * - Newsletter (POST /api/subscribe)
  * - Outils: bankroll + convertisseur de cotes
- * - FAQ, Footer (responsible gaming)
- * - Bouton développeur ⚙️, mot de passe obfusqué + anti-bruteforce
- * - LIVE: badge par carte + pill global en navbar, rafraîchi toutes les 60s
- * - Hero: mini cartes par sport + sparkline (12 derniers résultats) + libellé "Statistiques récentes"
- * - Bouton "Voir les pronos du jour" -> scroll + surbrillance (avec loader élégant)
- * - UX Admin: toasts de feedback + badge "Nouveau" (<30min)
- * - Tests intégrés (#tests dans l'URL)
+ * - FAQ
+ * - Anti-adblock (modale)
+ * - Modales légales (Confidentialité, Mentions, CGU, Contact)
+ * - Espace admin (protégé) pour ajouter/valider
+ * - Tests (#tests)
  */
 
 // ------------------------------
 // Constantes & helpers
 // ------------------------------
-// Mot de passe obfusqué (anti-piratage léger, côté client)
 const PWD_XOR = [51, 51, 123, 125, 122, 51, 51, 123, 125, 122]; // 'zz243zz243' XOR 73
 const XOR_KEY = 73;
 function decodeDevPassword() {
@@ -32,25 +28,23 @@ function decodeDevPassword() {
   }
 }
 const SPORTS = ["Football", "Tennis", "Basket"];
-// Endpoint backend optionnel pour la newsletter (à créer côté serveur)
-const SUBSCRIBE_ENDPOINT = "/api/subscribe"; // ex: Vercel/Netlify/Supabase Edge
+const SUBSCRIBE_ENDPOINT = "/api/subscribe";
 
 const hasWindow = typeof window !== "undefined";
-const LS =
-  hasWindow && window.localStorage
-    ? window.localStorage
-    : {
-        _m: {},
-        getItem(k) {
-          return this._m[k] ?? null;
-        },
-        setItem(k, v) {
-          this._m[k] = String(v);
-        },
-        removeItem(k) {
-          delete this._m[k];
-        },
-      };
+const LS = hasWindow && window.localStorage
+  ? window.localStorage
+  : {
+      _m: {},
+      getItem(k) {
+        return this._m[k] ?? null;
+      },
+      setItem(k, v) {
+        this._m[k] = String(v);
+      },
+      removeItem(k) {
+        delete this._m[k];
+      },
+    };
 
 function uuid() {
   try {
@@ -78,7 +72,6 @@ function yesterdayKey() {
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
-
 function clsx(...c) {
   return c.filter(Boolean).join(" ");
 }
@@ -100,9 +93,7 @@ function minutesSinceStart(pick, now = new Date()) {
   try {
     return Math.max(
       0,
-      Math.floor(
-        (now.getTime() - new Date(pick.kickoffISO).getTime()) / 60000
-      )
+      Math.floor((now.getTime() - new Date(pick.kickoffISO).getTime()) / 60000)
     );
   } catch {
     return 0;
@@ -253,7 +244,6 @@ const LivePill = ({ minutes }) => (
   </span>
 );
 
-// Simple spinner (loader élégant)
 const Spinner = () => (
   <span
     className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent"
@@ -376,7 +366,7 @@ function AdminPanel({ onClose, picks, setPicks, onToast }) {
       sport: form.sport,
       league: form.league,
       match: form.match,
-      kickoffISO: form.kickoffISO, // ✅ camelCase (l’API le convertira en kickoff_iso)
+      kickoffISO: form.kickoffISO, // camelCase (converti côté API)
       pick: form.pick,
       odds: form.odds,
       analysis: form.analysis,
@@ -392,16 +382,15 @@ function AdminPanel({ onClose, picks, setPicks, onToast }) {
     });
 
     if (res.ok) {
-      const fresh = await fetch("/api/picks", { cache: "no-store" }).then((r) =>
-        r.json()
+      const fresh = await fetch("/api/picks", { cache: "no-store" }).then((r) => r.json());
+      setPicks(
+        fresh.map((p) => ({
+          ...p,
+          kickoffISO: p.kickoff_iso,
+          date: p.date ?? String(p.kickoff_iso).slice(0, 10),
+          createdAt: p.created_at ? new Date(p.created_at).getTime() : Date.now(),
+        }))
       );
-      // Normaliser ici aussi au cas où:
-      const normalized = fresh.map((p) => ({
-        ...p,
-        kickoffISO: p.kickoff_iso ?? p.kickoffISO,
-        date: p.date ?? String(p.kickoff_iso ?? p.kickoffISO).slice(0, 10),
-      }));
-      setPicks(normalized);
       onToast && onToast(`Prono ajouté pour ${payload.date}`);
     } else {
       onToast && onToast("Erreur lors de l'ajout", "error");
@@ -417,15 +406,15 @@ function AdminPanel({ onClose, picks, setPicks, onToast }) {
     });
 
     if (res.ok) {
-      const fresh = await fetch("/api/picks", { cache: "no-store" }).then((r) =>
-        r.json()
+      const fresh = await fetch("/api/picks", { cache: "no-store" }).then((r) => r.json());
+      setPicks(
+        fresh.map((p) => ({
+          ...p,
+          kickoffISO: p.kickoff_iso,
+          date: p.date ?? String(p.kickoff_iso).slice(0, 10),
+          createdAt: p.created_at ? new Date(p.created_at).getTime() : Date.now(),
+        }))
       );
-      const normalized = fresh.map((p) => ({
-        ...p,
-        kickoffISO: p.kickoff_iso ?? p.kickoffISO,
-        date: p.date ?? String(p.kickoff_iso ?? p.kickoffISO).slice(0, 10),
-      }));
-      setPicks(normalized);
       onToast &&
         onToast(
           `Statut mis à jour: ${
@@ -635,9 +624,7 @@ function Tools() {
   function decToAmerican(d) {
     const v = parseFloat(d);
     if (!isFinite(v) || v <= 1) return "";
-    return v >= 2
-      ? Math.round((v - 1) * 100).toString()
-      : Math.round(-100 / (v - 1)).toString();
+    return v >= 2 ? Math.round((v - 1) * 100).toString() : Math.round(-100 / (v - 1)).toString();
   }
   function decToImplied(d) {
     const v = parseFloat(d);
@@ -680,19 +667,14 @@ function Tools() {
           <p className="text-neutral-300 text-sm mt-3">
             Mise conseillée: <span className="text-neutral-100 font-semibold">€{stake()}</span>
           </p>
-          <p className="text-xs text-neutral-500 mt-1">
-            Astuce: rester entre 1% et 3% par pari.
-          </p>
+          <p className="text-xs text-neutral-500 mt-1">Astuce: rester entre 1% et 3% par pari.</p>
         </div>
         <div>
           <h4 className="text-neutral-100 font-semibold mb-2">Convertisseur de cotes</h4>
           <div className="grid grid-cols-3 gap-3 items-end">
             <div>
               <label className="text-sm text-neutral-400">Décimale</label>
-              <Input
-                value={odds.decimal}
-                onChange={(e) => setOdds({ ...odds, decimal: e.target.value })}
-              />
+              <Input value={odds.decimal} onChange={(e) => setOdds({ ...odds, decimal: e.target.value })} />
             </div>
             <div>
               <label className="text-sm text-neutral-400">Américaine</label>
@@ -742,7 +724,7 @@ function Newsletter() {
         body: JSON.stringify({ email }),
       });
       if (res.ok) {
-        setMsg("Inscription confirmée. Vérifiez votre email (double opt-in).");
+        setMsg("Inscription confirmée. Merci !");
         setEmail("");
       } else {
         const next = list.includes(email) ? list : [...list, email];
@@ -764,18 +746,10 @@ function Newsletter() {
 
   return (
     <Card>
-      <SectionTitle
-        title="Newsletter"
-        subtitle="Recevez chaque jour nos pronostics gratuits par email."
-      />
+      <SectionTitle title="Newsletter" subtitle="Recevez chaque jour nos pronostics gratuits par email." />
       <form onSubmit={subscribe} className="flex flex-col md:flex-row gap-3">
-        <Input
-          placeholder="Votre email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-        {/* honeypot, volontairement caché */}
+        <Input placeholder="Votre email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        {/* honeypot */}
         <input
           aria-hidden
           name="website"
@@ -789,9 +763,7 @@ function Newsletter() {
       </form>
       {msg && <p className="text-xs text-emerald-300 mt-2">{msg}</p>}
       {err && <p className="text-xs text-rose-300 mt-2">{err}</p>}
-      <p className="text-xs text-neutral-500 mt-2">
-        Gratuit. Désinscription en un clic. Aucune pub.
-      </p>
+      <p className="text-xs text-neutral-500 mt-2">Gratuit. Désinscription en un clic. Aucune pub intrusive.</p>
     </Card>
   );
 }
@@ -801,11 +773,20 @@ function Newsletter() {
 // ------------------------------
 function FAQ() {
   const items = [
-    { q: "PronoAI est-il vraiment gratuit ?", a: "Oui. Le site et la newsletter sont 100% gratuits. Aucune inscription requise." },
-    { q: "Comment sont générés les pronostics ?", a: "Nos modèles IA agrègent forme récente, H2H, blessures, fatigue, style de jeu et mouvement des cotes pour estimer une probabilité et une confiance. L'analyste humain peut ajuster avant publication." },
-    { q: "Combien de pronos par jour ?", a: "Jusqu'à 9 : 3 Football, 3 Tennis, 3 Basket. S'il y a moins d'événements de qualité, nous privilégions la qualité." },
-    { q: "Proposez-vous du live betting ?", a: "Non pour l'instant. Nous publions avant match, avec heure de coup d'envoi et analyse." },
-    { q: "Conseils de mise ?", a: "Gérez votre bankroll, misez 1–3% par pari, ne cherchez pas à vous refaire. Jouez de manière responsable." },
+    {
+      q: "PronoAI est-il vraiment gratuit ?",
+      a: "Oui. Le site et la newsletter sont 100% gratuits. Aucune inscription requise.",
+    },
+    {
+      q: "Comment sont générés les pronostics ?",
+      a: "Nos modèles IA agrègent forme récente, H2H, blessures, fatigue, style de jeu et mouvement des cotes pour estimer une probabilité et une confiance. L'analyste humain peut ajuster avant publication.",
+    },
+    { q: "Combien de pronos par jour ?", a: "Jusqu'à 9 : 3 Football, 3 Tennis, 3 Basket." },
+    { q: "Proposez-vous du live betting ?", a: "Non pour l'instant. Nous publions avant match." },
+    {
+      q: "Conseils de mise ?",
+      a: "Gérez votre bankroll, misez 1–3% par pari, ne cherchez pas à vous refaire. Jouez de manière responsable.",
+    },
   ];
   const [open, setOpen] = useState(0);
   return (
@@ -821,9 +802,7 @@ function FAQ() {
               <span className="text-neutral-100 font-medium">{it.q}</span>
               <span className="text-neutral-500">{open === i ? "–" : "+"}</span>
             </button>
-            {open === i && (
-              <p className="text-neutral-300 mt-2 text-sm leading-relaxed">{it.a}</p>
-            )}
+            {open === i && <p className="text-neutral-300 mt-2 text-sm leading-relaxed">{it.a}</p>}
           </div>
         ))}
       </div>
@@ -832,7 +811,7 @@ function FAQ() {
 }
 
 // ------------------------------
-// Hero (avec actions + stats sparkline)
+// Hero (mini stats + actions)
 // ------------------------------
 function Hero({ onSeeToday, onFilterSport, stats, isScrolling }) {
   return (
@@ -922,22 +901,20 @@ function DailyPicks({ picks, filterSport, now }) {
       });
     Object.keys(base).forEach((k) =>
       base[k].sort(
-        (a, b) =>
-          new Date(a.kickoffISO).getTime() - new Date(b.kickoffISO).getTime()
+        (a, b) => new Date(a.kickoffISO).getTime() - new Date(b.kickoffISO).getTime()
       )
     );
     return base;
   }, [picks]);
 
-  const sportsToRender =
-    filterSport && SPORTS.includes(filterSport) ? [filterSport] : SPORTS;
+  const sportsToRender = filterSport && SPORTS.includes(filterSport) ? [filterSport] : SPORTS;
 
   return (
     <div className="space-y-8">
       {sportsToRender.map((sport) => (
         <div key={sport}>
           <SectionTitle
-            title={`⚡️ ${sport} — 3 pronos du jour`}
+            title={`\u26A1️ ${sport} — 3 pronos du jour`}
             subtitle="Analyses IA & niveau de confiance"
           />
           <div className="grid md:grid-cols-2 gap-4">
@@ -973,17 +950,11 @@ function Yesterday({ picks, now }) {
     <Card>
       <SectionTitle title="Pronos validés d'hier" subtitle={`Bilan du ${yKey}`} />
       {y.length === 0 ? (
-        <p className="text-neutral-400 text-sm">
-          Aucun historique pour hier pour le moment.
-        </p>
+        <p className="text-neutral-400 text-sm">Aucun historique pour hier pour le moment.</p>
       ) : (
         <>
           <div className="text-neutral-300 text-sm mb-4">
-            Résultats:{" "}
-            <span className="text-neutral-100 font-semibold">
-              {wins}/{total}
-            </span>{" "}
-            gagnés
+            Résultats: <span className="text-neutral-100 font-semibold">{wins}/{total}</span> gagnés
           </div>
           <div className="grid md:grid-cols-2 gap-4">
             {y.map((p) => (
@@ -997,196 +968,58 @@ function Yesterday({ picks, now }) {
 }
 
 // ------------------------------
-// Footer
+// Modale anti-adblock
 // ------------------------------
-function Footer() {
+function AdblockModal({ open, onClose }) {
+  if (!open) return null;
   return (
-    <footer className="mt-12 text-center text-xs text-neutral-500">
-      <p>
-        Jeu responsable : ne misez jamais plus que ce que vous pouvez vous permettre de perdre. 18+ seulement.
-      </p>
-      <p className="mt-1">
-        © {new Date().getFullYear()} PronoAI — Site gratuit, sans connexion. Ce site fournit des conseils, pas des garanties.
-      </p>
-    </footer>
+    <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-lg rounded-2xl bg-neutral-900 border border-white/10 p-6 shadow-2xl">
+        <div className="flex items-start justify-between">
+          <h3 className="text-lg font-semibold text-neutral-100">Merci de soutenir PronoAI 🙏</h3>
+          <button className="text-neutral-400 hover:text-neutral-200" onClick={onClose} aria-label="Fermer">
+            ✕
+          </button>
+        </div>
+        <p className="text-neutral-300 text-sm mt-3 leading-relaxed">
+          Nous détectons un bloqueur de publicités. Les annonces <b>financent l’hébergement</b> et
+          nous permettent de garder l’accès <b>100% gratuit</b>.
+        </p>
+        <p className="text-neutral-400 text-sm mt-2">
+          Peux-tu ajouter <span className="text-neutral-200 font-medium">pronoai</span> à ta liste blanche ?
+          Merci 💚
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl bg-neutral-800 text-neutral-200 border border-white/10 hover:bg-neutral-700"
+          >
+            Je comprends
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
 // ------------------------------
-// Tests (#tests dans l'URL)
+// Modale simple (légales)
 // ------------------------------
-function runSelfTests() {
-  const results = [];
-  function withRestoredLS(key, fn) {
-    const prev = LS.getItem(key);
-    try {
-      return fn();
-    } finally {
-      prev == null ? LS.removeItem(key) : LS.setItem(key, prev);
-    }
-  }
-
-  // Existence des constantes & helpers de base
-  results.push({
-    name: "SPORTS défini",
-    ok: Array.isArray(SPORTS) && SPORTS.includes("Football"),
-  });
-  results.push({
-    name: "todayKey/yesterdayKey format",
-    ok:
-      /^\d{4}-\d{2}-\d{2}$/.test(todayKey()) &&
-      /^\d{4}-\d{2}-\d{2}$/.test(yesterdayKey()),
-  });
-  results.push({
-    name: "SUBSCRIBE_ENDPOINT défini",
-    ok: typeof SUBSCRIBE_ENDPOINT === "string" && SUBSCRIBE_ENDPOINT.length > 0,
-  });
-  results.push({
-    name: "pushToastFactory défini",
-    ok: typeof pushToastFactory === "function",
-  });
-  results.push({ name: "Spinner défini", ok: typeof Spinner === "function" });
-  // Ajout de test (prévention erreur # commentaire): vérifie ancre sous forme de string
-  results.push({
-    name: "Ancre '#pronos' est une string valide",
-    ok: "#pronos".startsWith("#"),
-  });
-
-  // Bankroll: défaut / fallback / save+load
-  results.push(
-    withRestoredLS(LS_BANKROLL, () => {
-      LS.removeItem(LS_BANKROLL);
-      const got = loadBankroll();
-      return {
-        name: "loadBankroll défaut",
-        ok: got.bankroll === 100 && got.stakePct === 2,
-      };
-    })
-  );
-  results.push(
-    withRestoredLS(LS_BANKROLL, () => {
-      LS.setItem(LS_BANKROLL, "not json");
-      const got = loadBankroll();
-      return {
-        name: "loadBankroll fallback JSON invalide",
-        ok: got.bankroll === 100 && got.stakePct === 2,
-      };
-    })
-  );
-  results.push(
-    withRestoredLS(LS_BANKROLL, () => {
-      saveBankroll({ bankroll: 250, stakePct: 3 });
-      const got = loadBankroll();
-      return {
-        name: "saveBankroll + loadBankroll",
-        ok: got.bankroll === 250 && got.stakePct === 3,
-      };
-    })
-  );
-
-  // isLive
-  const now = new Date();
-  const pickLive = {
-    sport: "Football",
-    kickoffISO: new Date(now.getTime() - 30 * 60000).toISOString(),
-  };
-  const pickNotStarted = {
-    sport: "Football",
-    kickoffISO: new Date(now.getTime() + 30 * 60000).toISOString(),
-  };
-  const pickEnded = {
-    sport: "Football",
-    kickoffISO: new Date(now.getTime() - 3 * 60 * 60000).toISOString(),
-  };
-  results.push({
-    name: "isLive quand en cours",
-    ok: isLiveNow(pickLive, now) === true,
-  });
-  results.push({
-    name: "isLive quand pas commencé",
-    ok: isLiveNow(pickNotStarted, now) === false,
-  });
-  results.push({
-    name: "isLive quand terminé",
-    ok: isLiveNow(pickEnded, now) === false,
-  });
-
-  // Stats builder — renvoie des clés par sport
-  const dummyPicks = [
-    {
-      sport: "Football",
-      status: "win",
-      kickoffISO: new Date(now.getTime() - 100000).toISOString(),
-    },
-    {
-      sport: "Football",
-      status: "loss",
-      kickoffISO: new Date(now.getTime() - 90000).toISOString(),
-    },
-  ];
-  const _stats = (function buildStats(picks) {
-    const per = {
-      Football: { series: [], wr: 0 },
-      Tennis: { series: [], wr: 0 },
-      Basket: { series: [], wr: 0 },
-    };
-    const bySport = { Football: [], Tennis: [], Basket: [] };
-    [...picks]
-      .sort(
-        (a, b) =>
-          new Date(a.kickoffISO).getTime() - new Date(b.kickoffISO).getTime()
-      )
-      .forEach((p) => {
-        if (p.status === "win" || p.status === "loss") bySport[p.sport].push(p);
-      });
-    SPORTS.forEach((s) => {
-      const last = bySport[s].slice(-12);
-      const win = last.filter((p) => p.status === "win").length;
-      const total = last.length || 0;
-      per[s].wr = total ? Math.round((win / total) * 100) : 0;
-      per[s].series = last.map((p, i) => ({ i, v: p.status === "win" ? 1 : 0 }));
-    });
-    return per;
-  })(dummyPicks);
-  results.push({
-    name: "stats builder Football présent",
-    ok: typeof _stats.Football === "object",
-  });
-
-  // Dev password decoding works (sans révéler la valeur)
-  results.push({
-    name: "dev password décodage",
-    ok: checkDevPassword(decodeDevPassword()) === true,
-  });
-
-  return results;
-}
-
-function DevTests() {
-  const [results, setResults] = useState([]);
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.location.hash.includes("tests")) {
-      setResults(runSelfTests());
-    }
-  }, []);
-  if (!results.length) return null;
-  const allOk = results.every((r) => r.ok);
+function SimpleModal({ open, title, children, onClose }) {
+  if (!open) return null;
   return (
-    <div className="fixed bottom-20 right-4 z-50 max-w-md">
-      <Card className={allOk ? "ring-1 ring-emerald-500/40" : "ring-1 ring-rose-500/40"}>
-        <SectionTitle
-          title={allOk ? "Tests OK" : "Tests: échecs"}
-          subtitle="(ajoutez #tests à l'URL pour masquer/afficher)"
-        />
-        <ul className="space-y-2 text-sm">
-          {results.map((r, i) => (
-            <li key={i} className="flex items-start gap-2">
-              <span>{r.ok ? "✅" : "❌"}</span>
-              <span className={r.ok ? "text-neutral-200" : "text-rose-300"}>{r.name}</span>
-            </li>
-          ))}
-        </ul>
-      </Card>
+    <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-2xl rounded-2xl bg-neutral-900 border border-white/10 p-6 shadow-2xl">
+        <div className="flex items-start justify-between">
+          <h3 className="text-lg font-semibold text-neutral-100">{title}</h3>
+          <button className="text-neutral-400 hover:text-neutral-200" onClick={onClose} aria-label="Fermer">
+            ✕
+          </button>
+        </div>
+        <div className="mt-4 text-sm text-neutral-300 leading-relaxed max-h-[60vh] overflow-auto">
+          {children}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1207,7 +1040,6 @@ function writeAttempts(obj) {
     localStorage.setItem(LS_ADMIN_ATTEMPTS, JSON.stringify(obj));
   } catch {}
 }
-
 function PasswordModal({ onClose, onSuccess }) {
   const [pwd, setPwd] = useState("");
   const [err, setErr] = useState("");
@@ -1257,13 +1089,12 @@ function PasswordModal({ onClose, onSuccess }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
   return (
     <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
       <Card className="w-full max-w-sm">
         <h3 className="text-lg font-semibold text-neutral-100">Accès développeur</h3>
-        <p className="text-neutral-400 text-sm mt-1">
-          Entrez le mot de passe pour ouvrir l'admin.
-        </p>
+        <p className="text-neutral-400 text-sm mt-1">Entrez le mot de passe pour ouvrir l'admin.</p>
         <form onSubmit={submit} className="mt-4 space-y-3">
           <Input
             type="password"
@@ -1295,37 +1126,207 @@ function PasswordModal({ onClose, onSuccess }) {
 }
 
 // ------------------------------
+// Footer (avec modales + réseaux)
+// ------------------------------
+function Footer({ onOpen }) {
+  return (
+    <footer className="mt-12 text-center text-xs text-neutral-500">
+      <p>Jeu responsable : ne misez jamais plus que ce que vous pouvez vous permettre de perdre. 18+ seulement.</p>
+
+      <div className="mt-3 flex items-center justify-center gap-4">
+        <button className="hover:text-neutral-300 underline" onClick={() => onOpen('privacy')}>
+          Politique de confidentialité
+        </button>
+        <button className="hover:text-neutral-300 underline" onClick={() => onOpen('legal')}>
+          Mentions légales
+        </button>
+        <button className="hover:text-neutral-300 underline" onClick={() => onOpen('terms')}>
+          Conditions d’utilisation
+        </button>
+        <button className="hover:text-neutral-300 underline" onClick={() => onOpen('contact')}>
+          Contact
+        </button>
+      </div>
+
+      <div className="mt-3 flex items-center justify-center gap-4 text-neutral-400">
+        <a className="hover:text-neutral-200" href="#" target="_blank" rel="noreferrer">Instagram</a>
+        <a className="hover:text-neutral-200" href="#" target="_blank" rel="noreferrer">Telegram</a>
+        <a className="hover:text-neutral-200" href="#" target="_blank" rel="noreferrer">X (Twitter)</a>
+        <a className="hover:text-neutral-200" href="#" target="_blank" rel="noreferrer">Facebook</a>
+      </div>
+
+      <p className="mt-3">
+        © {new Date().getFullYear()} PronoAI — Site gratuit, sans connexion. Ce site fournit des conseils, pas des garanties.
+      </p>
+    </footer>
+  );
+}
+
+// ------------------------------
+// Tests (#tests dans l'URL)
+// ------------------------------
+function runSelfTests() {
+  const results = [];
+  function withRestoredLS(key, fn) {
+    const prev = LS.getItem(key);
+    try {
+      return fn();
+    } finally {
+      prev == null ? LS.removeItem(key) : LS.setItem(key, prev);
+    }
+  }
+
+  results.push({ name: "SPORTS défini", ok: Array.isArray(SPORTS) && SPORTS.includes("Football") });
+  results.push({
+    name: "todayKey/yesterdayKey format",
+    ok: /^\d{4}-\d{2}-\d{2}$/.test(todayKey()) && /^\d{4}-\d{2}-\d{2}$/.test(yesterdayKey()),
+  });
+  results.push({
+    name: "SUBSCRIBE_ENDPOINT défini",
+    ok: typeof SUBSCRIBE_ENDPOINT === "string" && SUBSCRIBE_ENDPOINT.length > 0,
+  });
+  results.push({ name: "pushToastFactory défini", ok: typeof pushToastFactory === "function" });
+  results.push({ name: "Spinner défini", ok: typeof Spinner === "function" });
+  results.push({ name: "Ancre '#pronos' est une string valide", ok: "#pronos".startsWith("#") });
+
+  results.push(
+    withRestoredLS(LS_BANKROLL, () => {
+      LS.removeItem(LS_BANKROLL);
+      const got = loadBankroll();
+      return { name: "loadBankroll défaut", ok: got.bankroll === 100 && got.stakePct === 2 };
+    })
+  );
+  results.push(
+    withRestoredLS(LS_BANKROLL, () => {
+      LS.setItem(LS_BANKROLL, "not json");
+      const got = loadBankroll();
+      return {
+        name: "loadBankroll fallback JSON invalide",
+        ok: got.bankroll === 100 && got.stakePct === 2,
+      };
+    })
+  );
+  results.push(
+    withRestoredLS(LS_BANKROLL, () => {
+      saveBankroll({ bankroll: 250, stakePct: 3 });
+      const got = loadBankroll();
+      return { name: "saveBankroll + loadBankroll", ok: got.bankroll === 250 && got.stakePct === 3 };
+    })
+  );
+
+  const now = new Date();
+  const pickLive = { sport: "Football", kickoffISO: new Date(now.getTime() - 30 * 60000).toISOString() };
+  const pickNotStarted = {
+    sport: "Football",
+    kickoffISO: new Date(now.getTime() + 30 * 60000).toISOString(),
+  };
+  const pickEnded = { sport: "Football", kickoffISO: new Date(now.getTime() - 3 * 60 * 60000).toISOString() };
+  results.push({ name: "isLive quand en cours", ok: isLiveNow(pickLive, now) === true });
+  results.push({ name: "isLive quand pas commencé", ok: isLiveNow(pickNotStarted, now) === false });
+  results.push({ name: "isLive quand terminé", ok: isLiveNow(pickEnded, now) === false });
+
+  const dummyPicks = [
+    { sport: "Football", status: "win", kickoffISO: new Date(now.getTime() - 100000).toISOString() },
+    { sport: "Football", status: "loss", kickoffISO: new Date(now.getTime() - 90000).toISOString() },
+  ];
+  const _stats = (function buildStats(picks) {
+    const per = { Football: { series: [], wr: 0 }, Tennis: { series: [], wr: 0 }, Basket: { series: [], wr: 0 } };
+    const bySport = { Football: [], Tennis: [], Basket: [] };
+    [...picks]
+      .sort((a, b) => new Date(a.kickoffISO).getTime() - new Date(b.kickoffISO).getTime())
+      .forEach((p) => {
+        if (p.status === "win" || p.status === "loss") bySport[p.sport].push(p);
+      });
+    SPORTS.forEach((s) => {
+      const last = bySport[s].slice(-12);
+      const win = last.filter((p) => p.status === "win").length;
+      const total = last.length || 0;
+      per[s].wr = total ? Math.round((win / total) * 100) : 0;
+      per[s].series = last.map((p, i) => ({ i, v: p.status === "win" ? 1 : 0 }));
+    });
+    return per;
+  })(dummyPicks);
+  results.push({ name: "stats builder Football présent", ok: typeof _stats.Football === "object" });
+
+  results.push({
+    name: "dev password décodage",
+    ok: checkDevPassword(decodeDevPassword()) === true,
+  });
+
+  return results;
+}
+
+function DevTests() {
+  const [results, setResults] = useState([]);
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.location.hash.includes("tests")) {
+      setResults(runSelfTests());
+    }
+  }, []);
+  if (!results.length) return null;
+  const allOk = results.every((r) => r.ok);
+  return (
+    <div className="fixed bottom-20 right-4 z-50 max-w-md">
+      <Card className={allOk ? "ring-1 ring-emerald-500/40" : "ring-1 ring-rose-500/40"}>
+        <SectionTitle
+          title={allOk ? "Tests OK" : "Tests: échecs"}
+          subtitle="(ajoutez #tests à l'URL pour masquer/afficher)"
+        />
+        <ul className="space-y-2 text-sm">
+          {results.map((r, i) => (
+            <li key={i} className="flex items-start gap-2">
+              <span>{r.ok ? "✅" : "❌"}</span>
+              <span className={r.ok ? "text-neutral-200" : "text-rose-300"}>{r.name}</span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </div>
+  );
+}
+
+// ------------------------------
+// Toast helper
+// ------------------------------
+function pushToastFactory(setter) {
+  return (msg, kind = "ok") => {
+    const id = Math.random().toString(36).slice(2);
+    setter((prev) => [...prev, { id, msg, kind }]);
+    setTimeout(() => setter((prev) => prev.filter((t) => t.id !== id)), 2500);
+  };
+}
+
+// ------------------------------
 // Root App
 // ------------------------------
 function PronoAIApp() {
   const [picks, setPicks] = useState([]);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [showPwd, setShowPwd] = useState(false);
+  const [filterSport, setFilterSport] = useState(null);
+  const [now, setNow] = useState(new Date());
+  const [adblock, setAdblock] = useState(false);
+  const [toasts, setToasts] = useState([]);
+  const [isScrolling, setIsScrolling] = useState(false);
+  const [legalModal, setLegalModal] = useState(null); // null | 'privacy' | 'legal' | 'terms' | 'contact'
+  const pushToast = pushToastFactory(setToasts);
 
+  // Charge les picks depuis l'API et normalise createdAt pour le badge "Nouveau"
   useEffect(() => {
     (async () => {
       try {
         const res = await fetch("/api/picks", { cache: "no-store" });
         const data = await res.json();
-        // Normalise DB → front
-        const normalised = (Array.isArray(data) ? data : []).map((p) => ({
+        const normalised = data.map((p) => ({
           ...p,
-          kickoffISO: p.kickoff_iso ?? p.kickoffISO,
-          date: p.date ?? String(p.kickoff_iso ?? p.kickoffISO).slice(0, 10),
+          kickoffISO: p.kickoff_iso,
+          date: p.date ?? String(p.kickoff_iso).slice(0, 10),
+          createdAt: p.created_at ? new Date(p.created_at).getTime() : Date.now(),
         }));
         setPicks(normalised);
-      } catch (e) {
-        // silencieux en prod
-      }
+      } catch (e) {}
     })();
   }, []);
-
-  const [showAdmin, setShowAdmin] = useState(false);
-  const [showPwd, setShowPwd] = useState(false);
-  const [filterSport, setFilterSport] = useState(null); // null = tous
-  const [now, setNow] = useState(new Date()); // tick LIVE
-  const [adblock, setAdblock] = useState(false); // détection adblock
-  const [toasts, setToasts] = useState([]); // UX admin
-  const [isScrolling, setIsScrolling] = useState(false);
-  const pushToast = pushToastFactory(setToasts);
 
   // Tick LIVE toutes les 60s
   useEffect(() => {
@@ -1333,7 +1334,7 @@ function PronoAIApp() {
     return () => clearInterval(t);
   }, []);
 
-  // Détection adblock (bait div)
+  // Détection adblock (bait div) -> modale
   useEffect(() => {
     if (!hasWindow) return;
     const bait = document.createElement("div");
@@ -1353,22 +1354,14 @@ function PronoAIApp() {
     }, 150);
   }, []);
 
-  // Stats par sport (winrate + série binaire win/loss)
+  // Stats par sport
   const stats = useMemo(() => {
-    const per = {
-      Football: { series: [], wr: 0 },
-      Tennis: { series: [], wr: 0 },
-      Basket: { series: [], wr: 0 },
-    };
+    const per = { Football: { series: [], wr: 0 }, Tennis: { series: [], wr: 0 }, Basket: { series: [], wr: 0 } };
     const bySport = { Football: [], Tennis: [], Basket: [] };
     [...picks]
-      .sort(
-        (a, b) =>
-          new Date(a.kickoffISO).getTime() - new Date(b.kickoffISO).getTime()
-      )
+      .sort((a, b) => new Date(a.kickoffISO).getTime() - new Date(b.kickoffISO).getTime())
       .forEach((p) => {
-        if (bySport[p.sport] && (p.status === "win" || p.status === "loss"))
-          bySport[p.sport].push(p);
+        if (bySport[p.sport] && (p.status === "win" || p.status === "loss")) bySport[p.sport].push(p);
       });
     SPORTS.forEach((s) => {
       const last = bySport[s].slice(-12);
@@ -1380,7 +1373,7 @@ function PronoAIApp() {
     return per;
   }, [picks]);
 
-  // Compte des matchs LIVE aujourd'hui (pour la navbar)
+  // Compte LIVE pour pill navbar
   const liveCount = useMemo(() => {
     const dKey = todayKey();
     return picks.filter((p) => p.date === dKey && isLiveNow(p, now)).length;
@@ -1399,13 +1392,7 @@ function PronoAIApp() {
     if (el) {
       el.classList.add("ring-2", "ring-emerald-500/40", "rounded-3xl", "p-1");
       setTimeout(
-        () =>
-          el.classList.remove(
-            "ring-2",
-            "ring-emerald-500/40",
-            "rounded-3xl",
-            "p-1"
-          ),
+        () => el.classList.remove("ring-2", "ring-emerald-500/40", "rounded-3xl", "p-1"),
         1200
       );
     }
@@ -1424,12 +1411,18 @@ function PronoAIApp() {
       <div className="max-w-6xl mx-auto px-4 py-6 md:py-10">
         {/* Nav */}
         <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-2xl bg-emerald-500 shadow-[0_10px_40px_-10px_rgba(16,185,129,0.7)]" />
-            <span className="text-neutral-100 font-semibold tracking-tight text-lg">
+          <button
+            onClick={() => {
+              if (typeof window !== "undefined") window.location.reload();
+            }}
+            className="flex items-center gap-3 group"
+            title="Actualiser la page"
+          >
+            <div className="h-8 w-8 rounded-2xl bg-emerald-500 shadow-[0_10px_40px_-10px_rgba(16,185,129,0.7)] group-hover:scale-105 transition" />
+            <span className="text-neutral-100 font-semibold tracking-tight text-lg group-hover:opacity-90">
               PronoAI
             </span>
-          </div>
+          </button>
           <div className="flex items-center gap-3 text-sm">
             <a
               href="#pronos"
@@ -1480,16 +1473,18 @@ function PronoAIApp() {
                 {liveCount} match{liveCount > 1 ? "s" : ""} en LIVE
               </span>
             )}
+            <button
+              onClick={() => setShowPwd(true)}
+              title="Espace développeur"
+              className="ml-2 px-3 py-1 rounded-xl bg-neutral-900/80 border border-white/10 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800"
+            >
+              ⚙️
+            </button>
           </div>
         </div>
 
         {/* Hero */}
-        <Hero
-          onSeeToday={onSeeToday}
-          onFilterSport={onFilterSport}
-          stats={stats}
-          isScrolling={isScrolling}
-        />
+        <Hero onSeeToday={onSeeToday} onFilterSport={onFilterSport} stats={stats} isScrolling={isScrolling} />
 
         {/* Filtre actif */}
         {filterSport && (
@@ -1529,42 +1524,54 @@ function PronoAIApp() {
           <FAQ />
         </div>
 
-        <Footer />
+        <Footer onOpen={setLegalModal} />
       </div>
 
-      {/* Adblock notice */}
-      {adblock && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50">
-          <Card className="bg-neutral-900/90 backdrop-blur-xl border-white/20">
-            <div className="flex items-center gap-3">
-              <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
-              <div>
-                <div className="text-sm text-neutral-100">Bloqueur détecté</div>
-                <div className="text-xs text-neutral-400">
-                  Pour une meilleure expérience, ajoutez{" "}
-                  <span className="text-neutral-200 font-medium">PronoAI</span> à votre liste blanche.
-                </div>
-              </div>
-              <button
-                onClick={() => setAdblock(false)}
-                className="ml-3 text-xs text-neutral-400 hover:text-neutral-200 underline"
-              >
-                Fermer
-              </button>
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {/* Bouton Dev */}
-      <button
-        onClick={() => setShowPwd(true)}
-        title="Espace développeur"
-        className="fixed bottom-4 right-4 z-50 p-3 rounded-2xl bg-neutral-900/80 border border-white/10 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 backdrop-blur-xl"
+      {/* Modales légales */}
+      <SimpleModal
+        open={legalModal === "privacy"}
+        title="Politique de confidentialité"
+        onClose={() => setLegalModal(null)}
       >
-        ⚙️
-      </button>
+        <p>
+          Exemple : Nous collectons uniquement votre email pour la newsletter. Aucune revente, pas de profilage.
+          Hébergement chez Vercel / Base de données Neon. Vous pouvez demander la suppression de vos données à tout moment.
+        </p>
+      </SimpleModal>
+      <SimpleModal
+        open={legalModal === "legal"}
+        title="Mentions légales"
+        onClose={() => setLegalModal(null)}
+      >
+        <p>
+          Raison sociale / éditeur : (à compléter). Hébergeur : Vercel Inc. (États-Unis). Contact : (à compléter).
+        </p>
+      </SimpleModal>
+      <SimpleModal
+        open={legalModal === "terms"}
+        title="Conditions générales d’utilisation"
+        onClose={() => setLegalModal(null)}
+      >
+        <ul className="list-disc pl-5 space-y-2">
+          <li>Contenu fourni à titre informatif, sans garantie de gain.</li>
+          <li>Interdit aux mineurs. Jouez de manière responsable.</li>
+          <li>L’utilisateur respecte la législation locale et celle des opérateurs.</li>
+        </ul>
+      </SimpleModal>
+      <SimpleModal
+        open={legalModal === "contact"}
+        title="Contact"
+        onClose={() => setLegalModal(null)}
+      >
+        <p>
+          Écrivez-nous : <span className="text-neutral-200">contact@ton-domaine.com</span> (à remplacer).
+        </p>
+      </SimpleModal>
 
+      {/* Modale anti-adblock */}
+      <AdblockModal open={adblock} onClose={() => setAdblock(false)} />
+
+      {/* Admin */}
       {showAdmin && (
         <AdminPanel
           onClose={() => setShowAdmin(false)}
@@ -1573,31 +1580,15 @@ function PronoAIApp() {
           onToast={(m, k) => pushToast(m, k)}
         />
       )}
-      {showPwd && (
-        <PasswordModal onClose={() => setShowPwd(false)} onSuccess={() => setShowAdmin(true)} />
-      )}
+      {showPwd && <PasswordModal onClose={() => setShowPwd(false)} onSuccess={() => setShowAdmin(true)} />}
 
       {/* Toasts */}
-      <Toasts
-        toasts={toasts}
-        onClose={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))}
-      />
+      <Toasts toasts={toasts} onClose={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
 
       {/* Tests */}
       <DevTests />
     </div>
   );
-}
-
-// ------------------------------
-// Toast helper
-// ------------------------------
-function pushToastFactory(setter) {
-  return (msg, kind = "ok") => {
-    const id = Math.random().toString(36).slice(2);
-    setter((prev) => [...prev, { id, msg, kind }]);
-    setTimeout(() => setter((prev) => prev.filter((t) => t.id !== id)), 2500);
-  };
 }
 
 export default PronoAIApp;
