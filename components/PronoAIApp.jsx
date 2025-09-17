@@ -1128,39 +1128,40 @@ function PasswordModal({ onClose, onSuccess }) {
 // ------------------------------
 // Footer (avec modales + réseaux)
 // ------------------------------
-function Footer({ onOpen }) {
+function Footer({ onOpenPrivacy, onOpenLegal, onOpenCGU, onOpenContact }) {
   return (
-    <footer className="mt-12 text-center text-xs text-neutral-500">
-      <p>Jeu responsable : ne misez jamais plus que ce que vous pouvez vous permettre de perdre. 18+ seulement.</p>
-
-      <div className="mt-3 flex items-center justify-center gap-4">
-        <button className="hover:text-neutral-300 underline" onClick={() => onOpen('privacy')}>
+    <footer className="mt-12 text-center text-xs text-neutral-500 space-y-3">
+      <div className="flex flex-wrap justify-center gap-x-6 gap-y-2">
+        <button type="button" onClick={onOpenPrivacy} className="hover:text-neutral-200 underline">
           Politique de confidentialité
         </button>
-        <button className="hover:text-neutral-300 underline" onClick={() => onOpen('legal')}>
+        <button type="button" onClick={onOpenLegal} className="hover:text-neutral-200 underline">
           Mentions légales
         </button>
-        <button className="hover:text-neutral-300 underline" onClick={() => onOpen('terms')}>
+        <button type="button" onClick={onOpenCGU} className="hover:text-neutral-200 underline">
           Conditions d’utilisation
         </button>
-        <button className="hover:text-neutral-300 underline" onClick={() => onOpen('contact')}>
+        <button type="button" onClick={onOpenContact} className="hover:text-neutral-200 underline">
           Contact
         </button>
       </div>
 
-      <div className="mt-3 flex items-center justify-center gap-4 text-neutral-400">
-        <a className="hover:text-neutral-200" href="#" target="_blank" rel="noreferrer">Instagram</a>
-        <a className="hover:text-neutral-200" href="#" target="_blank" rel="noreferrer">Telegram</a>
-        <a className="hover:text-neutral-200" href="#" target="_blank" rel="noreferrer">X (Twitter)</a>
-        <a className="hover:text-neutral-200" href="#" target="_blank" rel="noreferrer">Facebook</a>
+      {/* réseaux sociaux + textes inchangés */}
+      <div className="flex flex-wrap justify-center gap-6 text-neutral-400">
+        <a href="#" className="hover:text-neutral-200">Instagram</a>
+        <a href="#" className="hover:text-neutral-200">Telegram</a>
+        <a href="#" className="hover:text-neutral-200">X (Twitter)</a>
+        <a href="#" className="hover:text-neutral-200">Facebook</a>
       </div>
-
-      <p className="mt-3">
-        © {new Date().getFullYear()} PronoAI — Site gratuit, sans connexion. Ce site fournit des conseils, pas des garanties.
+      <p className="max-w-3xl mx-auto text-neutral-500">
+        Jeu responsable : ne misez jamais plus que ce que vous pouvez vous permettre de perdre. 18+ seulement.
       </p>
+      <p>© {new Date().getFullYear()} PronoAI — Site gratuit, sans connexion. Ce site fournit des conseils, pas des garanties.</p>
     </footer>
   );
 }
+
+
 
 // ------------------------------
 // Tests (#tests dans l'URL)
@@ -1524,49 +1525,123 @@ function PronoAIApp() {
           <FAQ />
         </div>
 
-        <Footer onOpen={setLegalModal} />
+<Footer
+  onOpenPrivacy={() => setLegalModal('privacy')}
+  onOpenLegal={() => setLegalModal('legal')}
+  onOpenCGU={() => setLegalModal('terms')}
+  onOpenContact={() => setLegalModal('contact')}
+/>
+
       </div>
 
       {/* Modales légales */}
+<SimpleModal
+  open={legalModal === "privacy"}
+  title="Politique de confidentialité"
+  onClose={() => setLegalModal(null)}
+>
+  <p className="text-neutral-400">Dernière mise à jour : 17/09/2025</p>
+
+  <p>
+    La présente Politique de Confidentialité décrit la manière dont <b>PronoAI.com</b> collecte,
+    utilise et protège les informations personnelles de ses utilisateurs.
+  </p>
+
+  <h3 className="text-neutral-100 font-medium">1. Collecte des données</h3>
+  <ul className="list-disc pl-5 space-y-1">
+    <li>Adresse e-mail (newsletter ou compte utilisateur)</li>
+    <li>Données de navigation (cookies, analytics)</li>
+  </ul>
+  <p>Aucune donnée sensible n’est collectée par défaut.</p>
+
+  <h3 className="text-neutral-100 font-medium">2. Utilisation des données</h3>
+  <ul className="list-disc pl-5 space-y-1">
+    <li>Envoi de newsletters</li>
+    <li>Amélioration de l’expérience utilisateur</li>
+    <li>Affichage de publicités adaptées</li>
+  </ul>
+
+  <h3 className="text-neutral-100 font-medium">3. Partage des données</h3>
+  <p>Jamais revendues. Transmises seulement aux prestataires techniques nécessaires (hébergeur, emailing).</p>
+
+  <h3 className="text-neutral-100 font-medium">4. Cookies</h3>
+  <p>Utilisés pour navigation, audience et publicité ciblée.</p>
+
+  <h3 className="text-neutral-100 font-medium">5. Sécurité</h3>
+  <p>Mesures techniques mises en place pour protéger vos données.</p>
+
+  <h3 className="text-neutral-100 font-medium">6. Droits RGPD</h3>
+  <p>
+    Vous disposez d’un droit d’accès, de modification, de suppression et de portabilité.
+    Contactez-nous à <a className="underline" href="mailto:contact@pronoai.com">contact@pronoai.com</a>.
+  </p>
+
+  <h3 className="text-neutral-100 font-medium">7. Conservation</h3>
+  <p>Les données sont supprimées ou anonymisées après utilisation.</p>
+
+  <h3 className="text-neutral-100 font-medium">8. Modification</h3>
+  <p>PronoAI.com peut modifier cette politique à tout moment (notification en cas de changement majeur).</p>
+</SimpleModal>
       <SimpleModal
-        open={legalModal === "privacy"}
-        title="Politique de confidentialité"
-        onClose={() => setLegalModal(null)}
-      >
-        <p>
-          Exemple : Nous collectons uniquement votre email pour la newsletter. Aucune revente, pas de profilage.
-          Hébergement chez Vercel / Base de données Neon. Vous pouvez demander la suppression de vos données à tout moment.
-        </p>
-      </SimpleModal>
+  open={legalModal === "legal"}
+  title="Mentions légales"
+  onClose={() => setLegalModal(null)}
+>
+  <p className="text-neutral-400">Dernière mise à jour : 17/09/2025</p>
+
+  <h3 className="text-neutral-100 font-medium">1. Éditeur du site</h3>
+  <p>
+    PronoAI.com est édité par un particulier.<br />
+    📩 Contact : <a className="underline" href="mailto:contact@pronoai.com">contact@pronoai.com</a>
+  </p>
+  <p className="text-neutral-400">
+    (Coordonnées personnelles non publiées, disponibles uniquement pour les autorités compétentes via l’hébergeur.)
+  </p>
+
+  <h3 className="text-neutral-100 font-medium">2. Hébergeur</h3>
+  <p>
+    Vercel Inc., 440 N Barranca Ave #4133, Covina, CA 91723, États-Unis<br />
+    🌐 <a className="underline" href="https://vercel.com" target="_blank" rel="noreferrer">vercel.com</a>
+  </p>
+
+  <h3 className="text-neutral-100 font-medium">3. Propriété intellectuelle</h3>
+  <p>
+    Le contenu du site est protégé par la loi. Toute reproduction non autorisée est interdite.
+  </p>
+
+  <h3 className="text-neutral-100 font-medium">4. Responsabilité</h3>
+  <p>
+    Les informations sont fournies à titre informatif. Aucune garantie de gain. L’utilisateur doit être majeur et vérifier
+    la légalité du pari dans son pays.
+  </p>
+</SimpleModal>
       <SimpleModal
-        open={legalModal === "legal"}
-        title="Mentions légales"
-        onClose={() => setLegalModal(null)}
-      >
-        <p>
-          Raison sociale / éditeur : (à compléter). Hébergeur : Vercel Inc. (États-Unis). Contact : (à compléter).
-        </p>
-      </SimpleModal>
+  open={legalModal === "terms"}
+  title="Conditions générales d’utilisation"
+  onClose={() => setLegalModal(null)}
+>
+  <p className="text-neutral-400">Dernière mise à jour : 17/09/2025</p>
+  <p>
+    En utilisant PronoAI.com, vous acceptez les présentes Conditions Générales d’Utilisation (CGU).
+  </p>
+
+  <ul className="list-disc pl-5 space-y-2">
+    <li>Site gratuit. Certaines fonctions peuvent être réservées aux inscrits.</li>
+    <li>Les contenus sont informatifs et ludiques, sans garantie.</li>
+    <li>Les paris comportent des risques financiers.</li>
+    <li>PronoAI décline toute responsabilité en cas de perte.</li>
+    <li>L’utilisateur doit être majeur et respecter sa législation locale.</li>
+  </ul>
+</SimpleModal>
       <SimpleModal
-        open={legalModal === "terms"}
-        title="Conditions générales d’utilisation"
-        onClose={() => setLegalModal(null)}
-      >
-        <ul className="list-disc pl-5 space-y-2">
-          <li>Contenu fourni à titre informatif, sans garantie de gain.</li>
-          <li>Interdit aux mineurs. Jouez de manière responsable.</li>
-          <li>L’utilisateur respecte la législation locale et celle des opérateurs.</li>
-        </ul>
-      </SimpleModal>
-      <SimpleModal
-        open={legalModal === "contact"}
-        title="Contact"
-        onClose={() => setLegalModal(null)}
-      >
-        <p>
-          Écrivez-nous : <span className="text-neutral-200">contact@ton-domaine.com</span> (à remplacer).
-        </p>
-      </SimpleModal>
+  open={legalModal === "contact"}
+  title="Contact"
+  onClose={() => setLegalModal(null)}
+>
+  <p>
+    Vous pouvez nous écrire à : <a className="underline" href="mailto:contact@pronoai.com">contact@pronoai.com</a>
+  </p>
+</SimpleModal>
 
       {/* Modale anti-adblock */}
       <AdblockModal open={adblock} onClose={() => setAdblock(false)} />
