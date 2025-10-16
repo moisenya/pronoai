@@ -1,1669 +1,200 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { ResponsiveContainer, AreaChart, Area } from "recharts";
+"use client";
 
-/**
- * PronoAI - App complète (React + Tailwind) avec :
- * - Logo cliquable (refresh)
- * - 9 pronos / jour (Football, Tennis, Basket)
- * - Badge "Nouveau" (<30 min) basé sur created_at (DB)
- * - Newsletter (POST /api/subscribe)
- * - Outils: bankroll + convertisseur de cotes
- * - FAQ
- * - Anti-adblock (modale)
- * - Modales légales (Confidentialité, Mentions, CGU, Contact)
- * - Espace admin (protégé) pour ajouter/valider
- * - Tests (#tests)
- */
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-// ------------------------------
-// Constantes & helpers
-// ------------------------------
-const PWD_XOR = [51, 51, 123, 125, 122, 51, 51, 123, 125, 122]; // 'zz243zz243' XOR 73
-const XOR_KEY = 73;
-function decodeDevPassword() {
-  try {
-    return String.fromCharCode(...PWD_XOR.map((n) => n ^ XOR_KEY));
-  } catch {
-    return "";
+const SPORTS_ORDER = ["Football", "Tennis", "Basket"];
+
+function groupBySport(picks) {
+  return picks.reduce((acc, pick) => {
+    acc[pick.sport] = acc[pick.sport] ?? [];
+    acc[pick.sport].push(pick);
+    return acc;
+  }, {});
+}
+
+function formatModelName(model) {
+  if (typeof model !== "string" || model.trim().length === 0) {
+    return null;
   }
-}
-const SPORTS = ["Football", "Tennis", "Basket"];
-const SUBSCRIBE_ENDPOINT = "/api/subscribe";
-
-const hasWindow = typeof window !== "undefined";
-const LS = hasWindow && window.localStorage
-  ? window.localStorage
-  : {
-      _m: {},
-      getItem(k) {
-        return this._m[k] ?? null;
-      },
-      setItem(k, v) {
-        this._m[k] = String(v);
-      },
-      removeItem(k) {
-        delete this._m[k];
-      },
-    };
-
-function uuid() {
-  try {
-    return crypto.randomUUID();
-  } catch {
-    return Math.random().toString(36).slice(2);
-  }
-}
-function checkDevPassword(pwd) {
-  return String(pwd || "") === decodeDevPassword();
+  const formatted = model
+    .replace(/^gemini/i, "Gemini")
+    .replace(/-/g, " ")
+    .replace(/\b([a-z])/g, (match) => match.toUpperCase());
+  return formatted;
 }
 
-function todayKey() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-function yesterdayKey() {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-function clsx(...c) {
-  return c.filter(Boolean).join(" ");
+function formatKickoff(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "À confirmer";
+  return new Intl.DateTimeFormat("fr-FR", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
-// LIVE — fenêtre estimée par sport (minutes)
-const SPORT_DURATION_MIN = { Football: 120, Basket: 120, Tennis: 180 };
-function isLiveNow(pick, now = new Date()) {
-  try {
-    const start = new Date(pick.kickoffISO);
-    if (isNaN(start)) return false;
-    const dur = SPORT_DURATION_MIN[pick.sport] || 120;
-    const end = new Date(start.getTime() + dur * 60 * 1000);
-    return now >= start && now <= end;
-  } catch {
-    return false;
-  }
-}
-function minutesSinceStart(pick, now = new Date()) {
-  try {
-    return Math.max(
-      0,
-      Math.floor((now.getTime() - new Date(pick.kickoffISO).getTime()) / 60000)
-    );
-  } catch {
-    return 0;
-  }
-}
-
-// ------------------------------
-// Storage helpers
-// ------------------------------
-const LS_PICKS = "pronoai_picks_v1";
-const LS_NEWS = "pronoai_news_v1";
-const LS_BANKROLL = "pronoai_bankroll_v1";
-
-function safeParse(str, fallback) {
-  try {
-    return JSON.parse(str);
-  } catch {
-    return fallback;
-  }
-}
-function loadPicks() {
-  return safeParse(LS.getItem(LS_PICKS) || "[]", []);
-}
-function savePicks(p) {
-  LS.setItem(LS_PICKS, JSON.stringify(p));
-}
-function loadEmails() {
-  return safeParse(LS.getItem(LS_NEWS) || "[]", []);
-}
-function saveEmails(e) {
-  LS.setItem(LS_NEWS, JSON.stringify(e));
-}
-function loadBankroll() {
-  const raw = LS.getItem(LS_BANKROLL) || '{"bankroll":100,"stakePct":2}';
-  return safeParse(raw, { bankroll: 100, stakePct: 2 });
-}
-function saveBankroll(d) {
-  LS.setItem(LS_BANKROLL, JSON.stringify(d));
-}
-
-// ------------------------------
-// UI atoms (Tailwind)
-// ------------------------------
-const Card = ({ children, className = "" }) => (
-  <div
-    className={clsx(
-      "rounded-3xl p-6 shadow-xl border border-white/10",
-      "bg-gradient-to-br from-neutral-900 via-neutral-900/90 to-black",
-      "backdrop-blur-xl transition-shadow transition-transform duration-200",
-      "hover:-translate-y-0.5 hover:shadow-[0_20px_60px_-20px_rgba(16,185,129,0.25)] hover:ring-1 hover:ring-emerald-400/10",
-      className
-    )}
-  >
-    {children}
-  </div>
-);
-
-const Badge = ({ children, tone = "neutral" }) => {
-  const tones = {
-    neutral: "bg-neutral-800 text-neutral-200 border border-white/10",
-    green: "bg-emerald-600/20 text-emerald-300 border border-emerald-400/20",
-    red: "bg-rose-600/20 text-rose-300 border border-rose-400/20",
-    yellow: "bg-yellow-600/20 text-yellow-200 border border-yellow-400/20",
-    blue: "bg-sky-600/20 text-sky-200 border border-sky-400/20",
-  };
-  return (
-    <span className={clsx("px-3 py-1 text-xs rounded-full", tones[tone])}>
-      {children}
-    </span>
-  );
-};
-
-const Button = ({ children, onClick, className = "", type = "button" }) => (
-  <button
-    type={type}
-    onClick={onClick}
-    className={clsx(
-      "px-4 py-2 rounded-2xl text-sm font-medium",
-      "bg-emerald-500 text-black hover:bg-emerald-400",
-      "shadow-[0_10px_40px_-10px_rgba(16,185,129,0.6)]",
-      className
-    )}
-  >
-    {children}
-  </button>
-);
-
-const Input = (props) => (
-  <input
-    {...props}
-    className={clsx(
-      "w-full px-4 py-2 rounded-xl bg-neutral-900 text-neutral-100",
-      "placeholder:text-neutral-500 border border-white/10 focus:outline-none",
-      "focus:ring-2 focus:ring-emerald-500/50",
-      props.className
-    )}
-  />
-);
-
-const Textarea = (props) => (
-  <textarea
-    {...props}
-    className={clsx(
-      "w-full px-4 py-3 rounded-xl bg-neutral-900 text-neutral-100",
-      "placeholder:text-neutral-500 border border-white/10 focus:outline-none",
-      "focus:ring-2 focus:ring-emerald-500/50 min-h-[110px]",
-      props.className
-    )}
-  />
-);
-
-const SectionTitle = ({ title, subtitle }) => (
-  <div className="mb-6">
-    <h2 className="text-2xl md:text-3xl font-semibold text-neutral-100">
-      {title}
-    </h2>
-    {subtitle && (
-      <p className="text-neutral-400 mt-1 text-sm md:text-base">{subtitle}</p>
-    )}
-  </div>
-);
-
-const ConfidenceBar = ({ value }) => (
-  <div className="w-full h-2 bg-neutral-800 rounded-full overflow-hidden">
-    <div
-      className="h-full bg-emerald-500 transition-all"
-      style={{ width: `${Math.max(0, Math.min(100, value))}%` }}
-    />
-  </div>
-);
-
-const StatusChip = ({ status }) => {
-  const map = {
-    pending: { label: "En attente", tone: "yellow" },
-    win: { label: "Gagné", tone: "green" },
-    loss: { label: "Perdu", tone: "red" },
-    void: { label: "Remboursé", tone: "blue" },
-    live: { label: "LIVE", tone: "red" },
-  };
-  const it = map[status] || map.pending;
-  return <Badge tone={it.tone}>{it.label}</Badge>;
-};
-
-const LivePill = ({ minutes }) => (
-  <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs bg-rose-600/20 text-rose-200 border border-rose-400/20">
-    <span className="h-2 w-2 rounded-full bg-rose-400 animate-pulse" /> LIVE •{" "}
-    {minutes}'
-  </span>
-);
-
-const Spinner = () => (
-  <span
-    className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent"
-    aria-label="Chargement"
-  />
-);
-
-// Toasts (UX Admin)
-function Toasts({ toasts, onClose }) {
-  return (
-    <div className="fixed bottom-4 right-4 z-[70] space-y-2">
-      {toasts.map((t) => (
-        <div
-          key={t.id}
-          className="px-4 py-3 rounded-2xl text-sm bg-neutral-900/90 text-neutral-100 border border-white/10 backdrop-blur-xl shadow-xl"
-        >
-          <div className="flex items-center gap-2">
-            <span className={t.kind === "error" ? "text-rose-300" : "text-emerald-300"}>
-              {t.kind === "error" ? "❌" : "✅"}
-            </span>
-            <span>{t.msg}</span>
-            <button
-              onClick={() => onClose(t.id)}
-              className="ml-2 text-neutral-400 hover:text-neutral-200 text-xs"
-            >
-              Fermer
-            </button>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ------------------------------
-// Pick Card
-// ------------------------------
-function PickCard({ pick, compact = false, now }) {
-  const live = isLiveNow(pick, now);
-  const minutes = live ? minutesSinceStart(pick, now) : 0;
-  const effectiveStatus = live && pick.status === "pending" ? "live" : pick.status;
-  const isNew =
-    typeof pick.createdAt === "number" &&
-    Date.now() - pick.createdAt < 30 * 60 * 1000; // < 30 min
+function PickCard({ pick }) {
+  const isGemini = pick.analysisSource === "gemini";
+  const formattedModel = formatModelName(pick.analysisModel);
+  const badgeLabel = isGemini
+    ? formattedModel
+      ? `Analyse ${formattedModel}`
+      : "Analyse Gemini"
+    : "Analyse interne";
+  const badgeStyles = isGemini
+    ? "border-cyan-400/30 bg-cyan-500/10 text-cyan-100"
+    : "border-neutral-500/30 bg-neutral-500/10 text-neutral-200";
+  const modelOdds = Number.isFinite(pick.odds) ? pick.odds : null;
+  const marketOdds = Number.isFinite(pick.marketOdds) ? pick.marketOdds : null;
+  const marketProbability = Number.isFinite(pick.marketImpliedProbability)
+    ? pick.marketImpliedProbability
+    : null;
+  const marketProvider = pick.marketProvider?.trim?.();
 
   return (
-    <Card className={clsx("relative", compact && "p-4")}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Badge tone="neutral">{pick.sport}</Badge>
-          <span className="text-neutral-200 font-medium">{pick.league}</span>
-          {isNew && <Badge tone="green">Nouveau</Badge>}
-        </div>
-        <div className="flex items-center gap-2">
-          {live && <LivePill minutes={minutes} />}
-          <StatusChip status={effectiveStatus} />
-        </div>
-      </div>
-
-      <div className="mt-3 grid md:grid-cols-3 gap-4 items-start">
-        <div className="md:col-span-2">
-          <h3 className="text-lg md:text-xl font-semibold text-neutral-100">
-            {pick.match}
-          </h3>
-          <p className="text-neutral-400 text-sm mt-1">
-            {new Date(pick.kickoffISO).toLocaleString()} — Sélection :{" "}
-            <span className="text-neutral-100">{pick.pick}</span> — Cote :{" "}
-            <span className="text-neutral-100">{pick.odds}</span>
-          </p>
-          <p className="text-neutral-300 mt-3 text-sm leading-relaxed">
-            {pick.analysis}
-          </p>
-        </div>
-        <div className="space-y-2">
-          <div
-            className="flex items-center justify-between text-sm"
-            title="Ce pourcentage est estimé par notre IA (forme, H2H, blessures, etc.)."
-          >
-            <span className="text-neutral-400 flex items-center gap-2">
-              Confiance <span className="text-neutral-500">▸</span>
-            </span>
-            <span className="text-neutral-100 font-medium" aria-label="Niveau de confiance IA">
-              {pick.confidence}%
-            </span>
-          </div>
-          <ConfidenceBar value={pick.confidence} />
-          <div className="text-xs text-neutral-500 mt-2">Date : {pick.date}</div>
-        </div>
-      </div>
-
-      <div className="pointer-events-none absolute inset-0 rounded-3xl ring-1 ring-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]" />
-    </Card>
-  );
-}
-
-// ------------------------------
-// Admin Panel (protégé)
-// ------------------------------
-function AdminPanel({ onClose, picks, setPicks, onToast }) {
-  const [form, setForm] = useState({
-    date: todayKey(),
-    sport: "Football",
-    league: "",
-    match: "",
-    kickoffISO: new Date().toISOString(),
-    pick: "",
-    odds: "1.80",
-    analysis: "Analyse IA: forme, H2H, valeur des cotes…",
-    confidence: 65,
-  });
-  const [tab, setTab] = useState("ajouter");
-
-  // --- AJOUT ---
-  async function addPick(e) {
-    e.preventDefault();
-
-    const payload = {
-      id: crypto.randomUUID?.() ?? Math.random().toString(36).slice(2),
-      date: form.date || new Date(form.kickoffISO).toISOString().slice(0, 10),
-      sport: form.sport,
-      league: form.league,
-      match: form.match,
-      kickoffISO: form.kickoffISO, // camelCase (converti côté API)
-      pick: form.pick,
-      odds: form.odds,
-      analysis: form.analysis,
-      confidence: form.confidence,
-      status: "pending",
-      createdAt: Date.now(),
-    };
-
-    const res = await fetch("/api/picks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    if (res.ok) {
-      const fresh = await fetch("/api/picks", { cache: "no-store" }).then((r) => r.json());
-      setPicks(
-        fresh.map((p) => ({
-          ...p,
-          kickoffISO: p.kickoff_iso,
-          date: p.date ?? String(p.kickoff_iso).slice(0, 10),
-          createdAt: p.created_at ? new Date(p.created_at).getTime() : Date.now(),
-        }))
-      );
-      onToast && onToast(`Prono ajouté pour ${payload.date}`);
-    } else {
-      onToast && onToast("Erreur lors de l'ajout", "error");
-    }
-  }
-
-  // --- MISE À JOUR STATUT ---
-  async function setStatus(id, status) {
-    const res = await fetch(`/api/picks/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-
-    if (res.ok) {
-      const fresh = await fetch("/api/picks", { cache: "no-store" }).then((r) => r.json());
-      setPicks(
-        fresh.map((p) => ({
-          ...p,
-          kickoffISO: p.kickoff_iso,
-          date: p.date ?? String(p.kickoff_iso).slice(0, 10),
-          createdAt: p.created_at ? new Date(p.created_at).getTime() : Date.now(),
-        }))
-      );
-      onToast &&
-        onToast(
-          `Statut mis à jour: ${
-            status === "win" ? "Gagné" : status === "loss" ? "Perdu" : "Remboursé"
-          }`
-        );
-    } else {
-      onToast && onToast("Erreur de mise à jour", "error");
-    }
-  }
-
-  const yKey = yesterdayKey();
-  const yPicks = useMemo(() => picks.filter((p) => p.date === yKey), [picks, yKey]);
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <Card className="w-full max-w-4xl">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xl font-semibold text-neutral-100">Espace développeur</h3>
-          <Button
-            className="bg-neutral-800 text-neutral-200 hover:bg-neutral-700"
-            onClick={onClose}
-          >
-            Fermer
-          </Button>
-        </div>
-
-        <div className="mt-4 flex gap-2 text-sm">
-          <button
-            className={clsx(
-              "px-4 py-2 rounded-xl",
-              tab === "ajouter" ? "bg-emerald-500 text-black" : "bg-neutral-800 text-neutral-300"
-            )}
-            onClick={() => setTab("ajouter")}
-          >
-            Ajouter des matchs
-          </button>
-          <button
-            className={clsx(
-              "px-4 py-2 rounded-xl",
-              tab === "valider" ? "bg-emerald-500 text-black" : "bg-neutral-800 text-neutral-300"
-            )}
-            onClick={() => setTab("valider")}
-          >
-            Valider les pronos d'hier
-          </button>
-        </div>
-
-        {tab === "ajouter" && (
-          <form onSubmit={addPick} className="grid md:grid-cols-2 gap-4 mt-4">
-            <div>
-              <label className="text-sm text-neutral-400">Date (YYYY-MM-DD)</label>
-              <Input
-                value={form.date}
-                onChange={(e) => setForm({ ...form, date: e.target.value })}
-                required
-              />
-            </div>
-            <div>
-              <label className="text-sm text-neutral-400">Sport</label>
-              <select
-                value={form.sport}
-                onChange={(e) => setForm({ ...form, sport: e.target.value })}
-                className="w-full px-4 py-2 rounded-xl bg-neutral-900 text-neutral-100 border border-white/10"
-              >
-                {SPORTS.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-sm text-neutral-400">Compétition/Ligue</label>
-              <Input
-                value={form.league}
-                onChange={(e) => setForm({ ...form, league: e.target.value })}
-                required
-              />
-            </div>
-            <div>
-              <label className="text-sm text-neutral-400">Match</label>
-              <Input
-                value={form.match}
-                onChange={(e) => setForm({ ...form, match: e.target.value })}
-                placeholder="Équipe A vs Équipe B"
-                required
-              />
-            </div>
-            <div>
-              <label className="text-sm text-neutral-400">Coup d'envoi (ISO)</label>
-              <Input
-                value={form.kickoffISO}
-                onChange={(e) => setForm({ ...form, kickoffISO: e.target.value })}
-                required
-              />
-              <p className="text-xs text-neutral-500 mt-1">Ex: {new Date().toISOString()}</p>
-            </div>
-            <div>
-              <label className="text-sm text-neutral-400">Sélection</label>
-              <Input
-                value={form.pick}
-                onChange={(e) => setForm({ ...form, pick: e.target.value })}
-                placeholder="Ex: Équipe A gagne"
-                required
-              />
-            </div>
-            <div>
-              <label className="text-sm text-neutral-400">Cote</label>
-              <Input
-                value={form.odds}
-                onChange={(e) => setForm({ ...form, odds: e.target.value })}
-                required
-              />
-            </div>
-            <div>
-              <label className="text-sm text-neutral-400">Confiance (%)</label>
-              <Input
-                type="number"
-                min={0}
-                max={100}
-                value={form.confidence}
-                onChange={(e) =>
-                  setForm({ ...form, confidence: Number(e.target.value) })
-                }
-                required
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className="text-sm text-neutral-400">Analyse</label>
-              <Textarea
-                value={form.analysis}
-                onChange={(e) => setForm({ ...form, analysis: e.target.value })}
-              />
-            </div>
-            <div className="md:col-span-2 flex justify-end">
-              <Button type="submit">Ajouter le prono</Button>
-            </div>
-          </form>
-        )}
-
-        {tab === "valider" && (
-          <div className="mt-4 space-y-3">
-            <p className="text-neutral-300 text-sm">
-              Pronos d'hier ({yKey}) — définissez le statut :
-            </p>
-            {yPicks.length === 0 && (
-              <Card className="bg-neutral-900/60 border-white/5">
-                <p className="text-neutral-400">Aucun prono enregistré hier.</p>
-              </Card>
-            )}
-            {yPicks.map((p) => (
-              <div
-                key={p.id}
-                className="flex items-center justify-between gap-4 p-3 rounded-2xl bg-neutral-900/60 border border-white/10"
-              >
-                <div className="min-w-0">
-                  <div className="text-neutral-200 font-medium truncate">
-                    {p.match}{" "}
-                    <span className="text-neutral-500 font-normal">({p.sport})</span>
-                  </div>
-                  <div className="text-xs text-neutral-500 truncate">
-                    Sélection: {p.pick} — Cote: {p.odds}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button className="bg-emerald-600" onClick={() => setStatus(p.id, "win")}>
-                    Gagné
-                  </Button>
-                  <Button
-                    className="bg-rose-600 text-white hover:bg-rose-500"
-                    onClick={() => setStatus(p.id, "loss")}
-                  >
-                    Perdu
-                  </Button>
-                  <Button
-                    className="bg-sky-600 text-white hover:bg-sky-500"
-                    onClick={() => setStatus(p.id, "void")}
-                  >
-                    Remboursé
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-    </div>
-  );
-}
-
-// ------------------------------
-// Outils: bankroll + cotes
-// ------------------------------
-function Tools() {
-  const [bank, setBank] = useState(loadBankroll());
-  const [odds, setOdds] = useState({ decimal: "1.80", american: "", implied: "" });
-
-  useEffect(() => {
-    saveBankroll(bank);
-  }, [bank]);
-
-  function stake() {
-    return (bank.bankroll * (bank.stakePct / 100)).toFixed(2);
-  }
-
-  function decToAmerican(d) {
-    const v = parseFloat(d);
-    if (!isFinite(v) || v <= 1) return "";
-    return v >= 2 ? Math.round((v - 1) * 100).toString() : Math.round(-100 / (v - 1)).toString();
-  }
-  function decToImplied(d) {
-    const v = parseFloat(d);
-    if (!isFinite(v) || v <= 1) return "";
-    return (100 / v).toFixed(2) + "%";
-  }
-
-  useEffect(() => {
-    setOdds((s) => ({
-      ...s,
-      american: decToAmerican(s.decimal),
-      implied: decToImplied(s.decimal),
-    }));
-  }, [odds.decimal]);
-
-  return (
-    <Card>
-      <SectionTitle title="Outils" subtitle="Gérez votre mise et convertissez vos cotes" />
-      <div className="grid md:grid-cols-2 gap-6">
+    <article className="rounded-2xl border border-emerald-500/20 bg-neutral-950/80 p-5 shadow-lg">
+      <header className="mb-2 flex items-start justify-between gap-3">
         <div>
-          <h4 className="text-neutral-100 font-semibold mb-2">Gestion de bankroll</h4>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-sm text-neutral-400">Bankroll (€)</label>
-              <Input
-                type="number"
-                value={bank.bankroll}
-                onChange={(e) => setBank({ ...bank, bankroll: Number(e.target.value) })}
-              />
-            </div>
-            <div>
-              <label className="text-sm text-neutral-400">Mise %</label>
-              <Input
-                type="number"
-                value={bank.stakePct}
-                onChange={(e) => setBank({ ...bank, stakePct: Number(e.target.value) })}
-              />
-            </div>
-          </div>
-          <p className="text-neutral-300 text-sm mt-3">
-            Mise conseillée: <span className="text-neutral-100 font-semibold">€{stake()}</span>
+          <p className="text-xs uppercase tracking-widest text-emerald-400">
+            {pick.league}
           </p>
-          <p className="text-xs text-neutral-500 mt-1">Astuce: rester entre 1% et 3% par pari.</p>
+          <h3 className="mt-1 text-lg font-semibold text-white">{pick.match}</h3>
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-sm font-medium text-emerald-200">
+            {pick.confidence}%
+          </span>
+          <span
+            className={`rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-wide ${badgeStyles}`}
+          >
+            {badgeLabel}
+          </span>
+        </div>
+      </header>
+      <dl className="grid grid-cols-2 gap-2 text-sm text-neutral-300">
+        <div>
+          <dt className="text-neutral-500">Coup d'envoi</dt>
+          <dd>{formatKickoff(pick.kickoffISO)}</dd>
         </div>
         <div>
-          <h4 className="text-neutral-100 font-semibold mb-2">Convertisseur de cotes</h4>
-          <div className="grid grid-cols-3 gap-3 items-end">
-            <div>
-              <label className="text-sm text-neutral-400">Décimale</label>
-              <Input value={odds.decimal} onChange={(e) => setOdds({ ...odds, decimal: e.target.value })} />
-            </div>
-            <div>
-              <label className="text-sm text-neutral-400">Américaine</label>
-              <Input value={odds.american} readOnly />
-            </div>
-            <div>
-              <label className="text-sm text-neutral-400">Proba implicite</label>
-              <Input value={odds.implied} readOnly />
-            </div>
-          </div>
+          <dt className="text-neutral-500">Marché</dt>
+          <dd>{pick.market}</dd>
         </div>
-      </div>
-    </Card>
+        <div>
+          <dt className="text-neutral-500">Pronostic</dt>
+          <dd className="font-medium text-white">{pick.pick}</dd>
+        </div>
+        <div>
+          <dt className="text-neutral-500">Cote simulée</dt>
+          <dd>{modelOdds !== null ? modelOdds.toFixed(2) : "—"}</dd>
+        </div>
+        {marketOdds !== null && (
+          <div>
+            <dt className="text-neutral-500">Cote marché</dt>
+            <dd>
+              {marketOdds.toFixed(2)}
+              {marketProbability ? ` (~${marketProbability}%)` : ""}
+              {marketProvider ? ` · ${marketProvider}` : ""}
+            </dd>
+          </div>
+        )}
+      </dl>
+      <p className="mt-4 text-sm leading-relaxed text-neutral-300">{pick.analysis}</p>
+    </article>
   );
 }
 
-// ------------------------------
-// Newsletter
-// ------------------------------
-function Newsletter() {
-  const [email, setEmail] = useState("");
-  const [list, setList] = useState(loadEmails());
-  const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState("");
-  const [err, setErr] = useState("");
-  const [hp, setHp] = useState(""); // honeypot anti-bot
+export default function PronoAIApp() {
+  const [picks, setPicks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  async function subscribe(e) {
-    e.preventDefault();
-    setMsg("");
-    setErr("");
-    const ok = /.+@.+\..+/.test(email);
-    if (!ok) {
-      setErr("Email invalide.");
-      return;
-    }
-    if (hp) {
-      setErr("Bot détecté.");
-      return;
-    }
-
-    setLoading(true);
+  const fetchPicks = useCallback(async () => {
     try {
-      const res = await fetch(SUBSCRIBE_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-      if (res.ok) {
-        setMsg("Inscription confirmée. Merci !");
-        setEmail("");
-      } else {
-        const next = list.includes(email) ? list : [...list, email];
-        setList(next);
-        saveEmails(next);
-        setMsg("Inscription enregistrée localement (mode démo).");
-        setEmail("");
+      setLoading(true);
+      setError(null);
+      const response = await fetch("/api/autopicks", { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error(`Impossible de récupérer les pronostics (${response.status})`);
       }
-    } catch (_) {
-      const next = list.includes(email) ? list : [...list, email];
-      setList(next);
-      saveEmails(next);
-      setMsg("Inscription enregistrée localement (mode démo).");
-      setEmail("");
+      const payload = await response.json();
+      setPicks(Array.isArray(payload.picks) ? payload.picks : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erreur inconnue");
+      setPicks([]);
     } finally {
       setLoading(false);
     }
-  }
-
-  return (
-    <Card>
-      <SectionTitle title="Newsletter" subtitle="Recevez chaque jour nos pronostics gratuits par email." />
-      <form onSubmit={subscribe} className="flex flex-col md:flex-row gap-3">
-        <Input placeholder="Votre email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        {/* honeypot */}
-        <input
-          aria-hidden
-          name="website"
-          tabIndex={-1}
-          autoComplete="off"
-          value={hp}
-          onChange={(e) => setHp(e.target.value)}
-          className="hidden"
-        />
-        <Button type="submit">{loading ? "Envoi…" : "S'abonner"}</Button>
-      </form>
-      {msg && <p className="text-xs text-emerald-300 mt-2">{msg}</p>}
-      {err && <p className="text-xs text-rose-300 mt-2">{err}</p>}
-      <p className="text-xs text-neutral-500 mt-2">Gratuit. Désinscription en un clic. Aucune pub intrusive.</p>
-    </Card>
-  );
-}
-
-// ------------------------------
-// FAQ
-// ------------------------------
-function FAQ() {
-  const items = [
-    {
-      q: "PronoAI est-il vraiment gratuit ?",
-      a: "Oui. Le site et la newsletter sont 100% gratuits. Aucune inscription requise.",
-    },
-    {
-      q: "Comment sont générés les pronostics ?",
-      a: "Nos modèles IA agrègent forme récente, H2H, blessures, fatigue, style de jeu et mouvement des cotes pour estimer une probabilité et une confiance. L'analyste humain peut ajuster avant publication.",
-    },
-    { q: "Combien de pronos par jour ?", a: "Jusqu'à 9 : 3 Football, 3 Tennis, 3 Basket." },
-    { q: "Proposez-vous du live betting ?", a: "Non pour l'instant. Nous publions avant match." },
-    {
-      q: "Conseils de mise ?",
-      a: "Gérez votre bankroll, misez 1–3% par pari, ne cherchez pas à vous refaire. Jouez de manière responsable.",
-    },
-  ];
-  const [open, setOpen] = useState(0);
-  return (
-    <Card>
-      <SectionTitle title="FAQ" subtitle="Questions fréquentes" />
-      <div className="divide-y divide-white/5">
-        {items.map((it, i) => (
-          <div key={i} className="py-4">
-            <button
-              className="w-full text-left flex items-center justify-between"
-              onClick={() => setOpen(open === i ? -1 : i)}
-            >
-              <span className="text-neutral-100 font-medium">{it.q}</span>
-              <span className="text-neutral-500">{open === i ? "–" : "+"}</span>
-            </button>
-            {open === i && <p className="text-neutral-300 mt-2 text-sm leading-relaxed">{it.a}</p>}
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-// ------------------------------
-// Hero (mini stats + actions)
-// ------------------------------
-function Hero({ onSeeToday, onFilterSport, stats, isScrolling }) {
-  return (
-    <div className="relative overflow-hidden rounded-3xl p-8 md:p-12 border border-white/10 bg-gradient-to-br from-black via-neutral-950 to-neutral-900">
-      <div className="absolute -top-16 -left-16 h-72 w-72 bg-emerald-500/20 blur-3xl rounded-full" />
-      <div className="absolute -bottom-16 -right-16 h-72 w-72 bg-neutral-400/10 blur-3xl rounded-full" />
-
-      <div className="relative z-10">
-        <div className="inline-flex items-center gap-2 mb-4">
-          <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-emerald-300 text-sm">IA Sports Picks — Gratuit</span>
-        </div>
-        <h1 className="text-4xl md:text-6xl font-semibold tracking-tight text-neutral-100">
-          PronoAI
-        </h1>
-        <p className="text-neutral-400 mt-4 max-w-2xl text-sm md:text-base">
-          Des pronostics sportifs <span className="text-neutral-200">précis</span>, une interface
-          <span className="text-neutral-200"> ultra épurée</span>, et une analyse IA claire avec un{" "}
-          <span className="text-neutral-200">niveau de confiance</span> pour chaque pari.
-        </p>
-        <div className="mt-6 flex flex-wrap items-center gap-3">
-          <Button onClick={onSeeToday}>
-            {isScrolling ? (
-              <span className="inline-flex items-center gap-2">
-                <Spinner /> Défilement…
-              </span>
-            ) : (
-              "Voir les pronos du jour"
-            )}
-          </Button>
-          <a
-            href="#newsletter"
-            className="px-4 py-2 rounded-2xl text-sm font-medium border border-white/15 text-neutral-200 hover:bg-white/5"
-          >
-            S'abonner
-          </a>
-        </div>
-      </div>
-
-      <div className="relative mt-10 md:mt-14">
-        <div className="mx-auto max-w-5xl grid md:grid-cols-3 gap-4">
-          {["Football", "Tennis", "Basket"].map((s, i) => (
-            <button
-              key={i}
-              onClick={() => onFilterSport(s)}
-              className="text-left rounded-3xl bg-neutral-900/60 backdrop-blur-xl border border-white/10 p-5 shadow-2xl transition hover:translate-y-[-2px] hover:shadow-emerald-500/10 hover:scale-[1.01] hover:ring-1 hover:ring-emerald-400/20"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-neutral-300">{s}</span>
-                <span className="text-xs text-neutral-500">{stats?.[s]?.wr ?? 0}% WR</span>
-              </div>
-              <div className="mt-4 h-24 rounded-2xl bg-gradient-to-br from-neutral-800 to-neutral-900 border border-white/10 overflow-hidden">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart
-                    data={
-                      stats?.[s]?.series?.length ? stats[s].series : [{ v: 0 }, { v: 0 }, { v: 0 }]
-                    }
-                    margin={{ top: 10, right: 10, left: 10, bottom: 10 }}
-                  >
-                    <Area type="monotone" dataKey="v" stroke="#34d399" fill="#34d399" fillOpacity={0.25} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="mt-2 text-neutral-400 text-xs">
-                Statistiques récentes (12 derniers pronos)
-              </div>
-              <div className="text-neutral-500 text-xs">Cliquez pour filtrer {s.toLowerCase()} ▶</div>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ------------------------------
-// Daily picks (filtrable)
-// ------------------------------
-function DailyPicks({ picks, filterSport, now }) {
-  const dKey = todayKey();
-  const bySport = useMemo(() => {
-    const base = { Football: [], Tennis: [], Basket: [] };
-    picks
-      .filter((p) => p.date === dKey)
-      .forEach((p) => {
-        (base[p.sport] || (base[p.sport] = [])).push(p);
-      });
-    Object.keys(base).forEach((k) =>
-      base[k].sort(
-        (a, b) => new Date(a.kickoffISO).getTime() - new Date(b.kickoffISO).getTime()
-      )
-    );
-    return base;
-  }, [picks]);
-
-  const sportsToRender = filterSport && SPORTS.includes(filterSport) ? [filterSport] : SPORTS;
-
-  return (
-    <div className="space-y-8">
-      {sportsToRender.map((sport) => (
-        <div key={sport}>
-          <SectionTitle
-            title={`\u26A1️ ${sport} — 3 pronos du jour`}
-            subtitle="Analyses IA & niveau de confiance"
-          />
-          <div className="grid md:grid-cols-2 gap-4">
-            {bySport[sport].slice(0, 3).map((p) => (
-              <PickCard key={p.id} pick={p} now={now} />
-            ))}
-            {bySport[sport].length === 0 && (
-              <Card>
-                <p className="text-neutral-400 text-sm">
-                  Aucun prono ajouté pour aujourd'hui. Attendez que les pronos soient ajoutés.
-                </p>
-              </Card>
-            )}
-          </div>
-          <div className="mt-3 text-xs text-neutral-500">
-            Astuce: privilégiez les cotes 1.70–2.20 et une mise de 1–3% par pari.
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ------------------------------
-// Hier (validés)
-// ------------------------------
-function Yesterday({ picks, now }) {
-  const yKey = yesterdayKey();
-  const y = picks.filter((p) => p.date === yKey);
-  const wins = y.filter((p) => p.status === "win").length;
-  const total = y.length;
-  return (
-    <Card>
-      <SectionTitle title="Pronos validés d'hier" subtitle={`Bilan du ${yKey}`} />
-      {y.length === 0 ? (
-        <p className="text-neutral-400 text-sm">Aucun historique pour hier pour le moment.</p>
-      ) : (
-        <>
-          <div className="text-neutral-300 text-sm mb-4">
-            Résultats: <span className="text-neutral-100 font-semibold">{wins}/{total}</span> gagnés
-          </div>
-          <div className="grid md:grid-cols-2 gap-4">
-            {y.map((p) => (
-              <PickCard key={p.id} pick={p} compact now={now} />
-            ))}
-          </div>
-        </>
-      )}
-    </Card>
-  );
-}
-
-// ------------------------------
-// Modale anti-adblock
-// ------------------------------
-function AdblockModal({ open, onClose }) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-lg rounded-2xl bg-neutral-900 border border-white/10 p-6 shadow-2xl">
-        <div className="flex items-start justify-between">
-          <h3 className="text-lg font-semibold text-neutral-100">Merci de soutenir PronoAI 🙏</h3>
-          <button className="text-neutral-400 hover:text-neutral-200" onClick={onClose} aria-label="Fermer">
-            ✕
-          </button>
-        </div>
-        <p className="text-neutral-300 text-sm mt-3 leading-relaxed">
-          Nous détectons un bloqueur de publicités. Les annonces <b>financent l’hébergement</b> et
-          nous permettent de garder l’accès <b>100% gratuit</b>.
-        </p>
-        <p className="text-neutral-400 text-sm mt-2">
-          Peux-tu ajouter <span className="text-neutral-200 font-medium">pronoai</span> à ta liste blanche ?
-          Merci 💚
-        </p>
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-neutral-800 text-neutral-200 border border-white/10 hover:bg-neutral-700"
-          >
-            Je comprends
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ------------------------------
-// Modale simple (légales)
-// ------------------------------
-function SimpleModal({ open, title, children, onClose }) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl rounded-2xl bg-neutral-900 border border-white/10 p-6 shadow-2xl">
-        <div className="flex items-start justify-between">
-          <h3 className="text-lg font-semibold text-neutral-100">{title}</h3>
-          <button className="text-neutral-400 hover:text-neutral-200" onClick={onClose} aria-label="Fermer">
-            ✕
-          </button>
-        </div>
-        <div className="mt-4 text-sm text-neutral-300 leading-relaxed max-h-[60vh] overflow-auto">
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ------------------------------
-// Password Modal (anti-bruteforce basique)
-// ------------------------------
-const LS_ADMIN_ATTEMPTS = "pronoai_admin_attempts_v1";
-function readAttempts() {
-  try {
-    return JSON.parse(localStorage.getItem(LS_ADMIN_ATTEMPTS) || "{}");
-  } catch {
-    return {};
-  }
-}
-function writeAttempts(obj) {
-  try {
-    localStorage.setItem(LS_ADMIN_ATTEMPTS, JSON.stringify(obj));
-  } catch {}
-}
-function PasswordModal({ onClose, onSuccess }) {
-  const [pwd, setPwd] = useState("");
-  const [err, setErr] = useState("");
-  const [locked, setLocked] = useState(null);
-
-  useEffect(() => {
-    const a = readAttempts();
-    if (a.until && Date.now() < a.until) setLocked(new Date(a.until));
   }, []);
 
-  function registerFail() {
-    const a = readAttempts();
-    const count = (a.count || 0) + 1;
-    const next = { count };
-    if (count >= 5) {
-      next.until = Date.now() + 10 * 60 * 1000;
-    }
-    writeAttempts(next);
-    if (next.until) setLocked(new Date(next.until));
-  }
-  function resetAttempts() {
-    writeAttempts({});
-    setLocked(null);
-  }
-
-  function submit(e) {
-    e.preventDefault();
-    const a = readAttempts();
-    if (a.until && Date.now() < a.until) {
-      setErr("Trop d'essais. Réessayez plus tard.");
-      return;
-    }
-    if (checkDevPassword(pwd)) {
-      resetAttempts();
-      setErr("");
-      onSuccess();
-      onClose();
-    } else {
-      setErr("Mot de passe incorrect.");
-      registerFail();
-    }
-  }
   useEffect(() => {
-    function onKey(e) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    fetchPicks();
+  }, [fetchPicks]);
+
+  const grouped = useMemo(() => groupBySport(picks), [picks]);
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <Card className="w-full max-w-sm">
-        <h3 className="text-lg font-semibold text-neutral-100">Accès développeur</h3>
-        <p className="text-neutral-400 text-sm mt-1">Entrez le mot de passe pour ouvrir l'admin.</p>
-        <form onSubmit={submit} className="mt-4 space-y-3">
-          <Input
-            type="password"
-            placeholder="Mot de passe"
-            value={pwd}
-            onChange={(e) => setPwd(e.target.value)}
-            autoFocus
-          />
-          {err && <div className="text-rose-400 text-sm">{err}</div>}
-          <div className="flex justify-end gap-2">
-            <Button
-              className="bg-neutral-800 text-neutral-200 hover:bg-neutral-700"
-              onClick={onClose}
-              type="button"
-            >
-              Annuler
-            </Button>
-            <Button type="submit">Valider</Button>
-          </div>
-          {locked && (
-            <div className="text-amber-300 text-xs mt-1">
-              Verrouillage anti-bruteforce actif jusqu'à {locked.toLocaleTimeString()}.
-            </div>
-          )}
-        </form>
-      </Card>
-    </div>
-  );
-}
-
-// ------------------------------
-// Footer (avec modales + réseaux)
-// ------------------------------
-function Footer({ onOpenPrivacy, onOpenLegal, onOpenCGU, onOpenContact }) {
-  return (
-    <footer className="mt-12 text-center text-xs text-neutral-500 space-y-3">
-      <div className="flex flex-wrap justify-center gap-x-6 gap-y-2">
-        <button type="button" onClick={onOpenPrivacy} className="hover:text-neutral-200 underline">
-          Politique de confidentialité
-        </button>
-        <button type="button" onClick={onOpenLegal} className="hover:text-neutral-200 underline">
-          Mentions légales
-        </button>
-        <button type="button" onClick={onOpenCGU} className="hover:text-neutral-200 underline">
-          Conditions d’utilisation
-        </button>
-        <button type="button" onClick={onOpenContact} className="hover:text-neutral-200 underline">
-          Contact
-        </button>
-      </div>
-
-      {/* réseaux sociaux + textes inchangés */}
-      <div className="flex flex-wrap justify-center gap-6 text-neutral-400">
-        <a href="#" className="hover:text-neutral-200">Instagram</a>
-        <a href="#" className="hover:text-neutral-200">Telegram</a>
-        <a href="#" className="hover:text-neutral-200">X (Twitter)</a>
-        <a href="#" className="hover:text-neutral-200">Facebook</a>
-      </div>
-      <p className="max-w-3xl mx-auto text-neutral-500">
-        Jeu responsable : ne misez jamais plus que ce que vous pouvez vous permettre de perdre. 18+ seulement.
-      </p>
-      <p>© {new Date().getFullYear()} PronoAI — Site gratuit, sans connexion. Ce site fournit des conseils, pas des garanties.</p>
-    </footer>
-  );
-}
-
-
-
-// ------------------------------
-// Tests (#tests dans l'URL)
-// ------------------------------
-function runSelfTests() {
-  const results = [];
-  function withRestoredLS(key, fn) {
-    const prev = LS.getItem(key);
-    try {
-      return fn();
-    } finally {
-      prev == null ? LS.removeItem(key) : LS.setItem(key, prev);
-    }
-  }
-
-  results.push({ name: "SPORTS défini", ok: Array.isArray(SPORTS) && SPORTS.includes("Football") });
-  results.push({
-    name: "todayKey/yesterdayKey format",
-    ok: /^\d{4}-\d{2}-\d{2}$/.test(todayKey()) && /^\d{4}-\d{2}-\d{2}$/.test(yesterdayKey()),
-  });
-  results.push({
-    name: "SUBSCRIBE_ENDPOINT défini",
-    ok: typeof SUBSCRIBE_ENDPOINT === "string" && SUBSCRIBE_ENDPOINT.length > 0,
-  });
-  results.push({ name: "pushToastFactory défini", ok: typeof pushToastFactory === "function" });
-  results.push({ name: "Spinner défini", ok: typeof Spinner === "function" });
-  results.push({ name: "Ancre '#pronos' est une string valide", ok: "#pronos".startsWith("#") });
-
-  results.push(
-    withRestoredLS(LS_BANKROLL, () => {
-      LS.removeItem(LS_BANKROLL);
-      const got = loadBankroll();
-      return { name: "loadBankroll défaut", ok: got.bankroll === 100 && got.stakePct === 2 };
-    })
-  );
-  results.push(
-    withRestoredLS(LS_BANKROLL, () => {
-      LS.setItem(LS_BANKROLL, "not json");
-      const got = loadBankroll();
-      return {
-        name: "loadBankroll fallback JSON invalide",
-        ok: got.bankroll === 100 && got.stakePct === 2,
-      };
-    })
-  );
-  results.push(
-    withRestoredLS(LS_BANKROLL, () => {
-      saveBankroll({ bankroll: 250, stakePct: 3 });
-      const got = loadBankroll();
-      return { name: "saveBankroll + loadBankroll", ok: got.bankroll === 250 && got.stakePct === 3 };
-    })
-  );
-
-  const now = new Date();
-  const pickLive = { sport: "Football", kickoffISO: new Date(now.getTime() - 30 * 60000).toISOString() };
-  const pickNotStarted = {
-    sport: "Football",
-    kickoffISO: new Date(now.getTime() + 30 * 60000).toISOString(),
-  };
-  const pickEnded = { sport: "Football", kickoffISO: new Date(now.getTime() - 3 * 60 * 60000).toISOString() };
-  results.push({ name: "isLive quand en cours", ok: isLiveNow(pickLive, now) === true });
-  results.push({ name: "isLive quand pas commencé", ok: isLiveNow(pickNotStarted, now) === false });
-  results.push({ name: "isLive quand terminé", ok: isLiveNow(pickEnded, now) === false });
-
-  const dummyPicks = [
-    { sport: "Football", status: "win", kickoffISO: new Date(now.getTime() - 100000).toISOString() },
-    { sport: "Football", status: "loss", kickoffISO: new Date(now.getTime() - 90000).toISOString() },
-  ];
-  const _stats = (function buildStats(picks) {
-    const per = { Football: { series: [], wr: 0 }, Tennis: { series: [], wr: 0 }, Basket: { series: [], wr: 0 } };
-    const bySport = { Football: [], Tennis: [], Basket: [] };
-    [...picks]
-      .sort((a, b) => new Date(a.kickoffISO).getTime() - new Date(b.kickoffISO).getTime())
-      .forEach((p) => {
-        if (p.status === "win" || p.status === "loss") bySport[p.sport].push(p);
-      });
-    SPORTS.forEach((s) => {
-      const last = bySport[s].slice(-12);
-      const win = last.filter((p) => p.status === "win").length;
-      const total = last.length || 0;
-      per[s].wr = total ? Math.round((win / total) * 100) : 0;
-      per[s].series = last.map((p, i) => ({ i, v: p.status === "win" ? 1 : 0 }));
-    });
-    return per;
-  })(dummyPicks);
-  results.push({ name: "stats builder Football présent", ok: typeof _stats.Football === "object" });
-
-  results.push({
-    name: "dev password décodage",
-    ok: checkDevPassword(decodeDevPassword()) === true,
-  });
-
-  return results;
-}
-
-function DevTests() {
-  const [results, setResults] = useState([]);
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.location.hash.includes("tests")) {
-      setResults(runSelfTests());
-    }
-  }, []);
-  if (!results.length) return null;
-  const allOk = results.every((r) => r.ok);
-  return (
-    <div className="fixed bottom-20 right-4 z-50 max-w-md">
-      <Card className={allOk ? "ring-1 ring-emerald-500/40" : "ring-1 ring-rose-500/40"}>
-        <SectionTitle
-          title={allOk ? "Tests OK" : "Tests: échecs"}
-          subtitle="(ajoutez #tests à l'URL pour masquer/afficher)"
-        />
-        <ul className="space-y-2 text-sm">
-          {results.map((r, i) => (
-            <li key={i} className="flex items-start gap-2">
-              <span>{r.ok ? "✅" : "❌"}</span>
-              <span className={r.ok ? "text-neutral-200" : "text-rose-300"}>{r.name}</span>
-            </li>
-          ))}
-        </ul>
-      </Card>
-    </div>
-  );
-}
-
-// ------------------------------
-// Toast helper
-// ------------------------------
-function pushToastFactory(setter) {
-  return (msg, kind = "ok") => {
-    const id = Math.random().toString(36).slice(2);
-    setter((prev) => [...prev, { id, msg, kind }]);
-    setTimeout(() => setter((prev) => prev.filter((t) => t.id !== id)), 2500);
-  };
-}
-
-// ------------------------------
-// Root App
-// ------------------------------
-function PronoAIApp() {
-  const [picks, setPicks] = useState([]);
-  const [showAdmin, setShowAdmin] = useState(false);
-  const [showPwd, setShowPwd] = useState(false);
-  const [filterSport, setFilterSport] = useState(null);
-  const [now, setNow] = useState(new Date());
-  const [adblock, setAdblock] = useState(false);
-  const [toasts, setToasts] = useState([]);
-  const [isScrolling, setIsScrolling] = useState(false);
-  const [legalModal, setLegalModal] = useState(null); // null | 'privacy' | 'legal' | 'terms' | 'contact'
-  const pushToast = pushToastFactory(setToasts);
-
-  // Charge les picks depuis l'API et normalise createdAt pour le badge "Nouveau"
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/picks", { cache: "no-store" });
-        const data = await res.json();
-        const normalised = data.map((p) => ({
-          ...p,
-          kickoffISO: p.kickoff_iso,
-          date: p.date ?? String(p.kickoff_iso).slice(0, 10),
-          createdAt: p.created_at ? new Date(p.created_at).getTime() : Date.now(),
-        }));
-        setPicks(normalised);
-      } catch (e) {}
-    })();
-  }, []);
-
-  // Tick LIVE toutes les 60s
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 60 * 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  // Détection adblock (bait div) -> modale
-  useEffect(() => {
-    if (!hasWindow) return;
-    const bait = document.createElement("div");
-    bait.className = "adsbox adsbygoogle ad-banner";
-    bait.style.position = "absolute";
-    bait.style.left = "-9999px";
-    bait.style.height = "10px";
-    bait.style.width = "10px";
-    document.body.appendChild(bait);
-    setTimeout(() => {
-      const hidden =
-        getComputedStyle(bait).display === "none" ||
-        bait.offsetParent === null ||
-        bait.clientHeight === 0;
-      setAdblock(hidden);
-      document.body.removeChild(bait);
-    }, 150);
-  }, []);
-
-  // Stats par sport
-  const stats = useMemo(() => {
-    const per = { Football: { series: [], wr: 0 }, Tennis: { series: [], wr: 0 }, Basket: { series: [], wr: 0 } };
-    const bySport = { Football: [], Tennis: [], Basket: [] };
-    [...picks]
-      .sort((a, b) => new Date(a.kickoffISO).getTime() - new Date(b.kickoffISO).getTime())
-      .forEach((p) => {
-        if (bySport[p.sport] && (p.status === "win" || p.status === "loss")) bySport[p.sport].push(p);
-      });
-    SPORTS.forEach((s) => {
-      const last = bySport[s].slice(-12);
-      const win = last.filter((p) => p.status === "win").length;
-      const total = last.length || 0;
-      per[s].wr = total ? Math.round((win / total) * 100) : 0;
-      per[s].series = last.map((p, i) => ({ i, v: p.status === "win" ? 1 : 0 }));
-    });
-    return per;
-  }, [picks]);
-
-  // Compte LIVE pour pill navbar
-  const liveCount = useMemo(() => {
-    const dKey = todayKey();
-    return picks.filter((p) => p.date === dKey && isLiveNow(p, now)).length;
-  }, [picks, now]);
-
-  function scrollToId(id) {
-    if (!hasWindow) return;
-    const el = document.querySelector(id);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-  function onSeeToday() {
-    if (isScrolling) return;
-    setIsScrolling(true);
-    scrollToId("#pronos");
-    const el = hasWindow && document.querySelector("#pronos");
-    if (el) {
-      el.classList.add("ring-2", "ring-emerald-500/40", "rounded-3xl", "p-1");
-      setTimeout(
-        () => el.classList.remove("ring-2", "ring-emerald-500/40", "rounded-3xl", "p-1"),
-        1200
-      );
-    }
-    setTimeout(() => setIsScrolling(false), 900);
-  }
-  function onFilterSport(s) {
-    setFilterSport(s);
-    scrollToId("#pronos");
-  }
-  function clearFilter() {
-    setFilterSport(null);
-  }
-
-  return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-200">
-      <div className="max-w-6xl mx-auto px-4 py-6 md:py-10">
-        {/* Nav */}
-        <div className="flex items-center justify-between mb-6">
-          <button
-            onClick={() => {
-              if (typeof window !== "undefined") window.location.reload();
-            }}
-            className="flex items-center gap-3 group"
-            title="Actualiser la page"
-          >
-            <div className="h-8 w-8 rounded-2xl bg-emerald-500 shadow-[0_10px_40px_-10px_rgba(16,185,129,0.7)] group-hover:scale-105 transition" />
-            <span className="text-neutral-100 font-semibold tracking-tight text-lg group-hover:opacity-90">
+    <main className="min-h-screen bg-gradient-to-br from-neutral-950 via-neutral-900 to-black px-4 py-10 text-neutral-100">
+      <section className="mx-auto max-w-5xl space-y-10">
+        <header className="flex flex-col gap-4 rounded-3xl border border-emerald-500/20 bg-neutral-950/60 p-8 text-center shadow-xl">
+          <div>
+            <p className="text-sm uppercase tracking-[0.4em] text-emerald-400">
               PronoAI
-            </span>
-          </button>
-          <div className="flex items-center gap-3 text-sm">
-            <a
-              href="#pronos"
-              onClick={(e) => {
-                e.preventDefault();
-                onSeeToday();
-              }}
-              className="text-neutral-300 hover:text-neutral-100"
-            >
-              Pronos du jour
-            </a>
-            <a
-              href="#yesterday"
-              onClick={(e) => {
-                e.preventDefault();
-                scrollToId("#yesterday");
-              }}
-              className="text-neutral-300 hover:text-neutral-100"
-            >
-              Validés d'hier
-            </a>
-            <a
-              href="#tools"
-              onClick={(e) => {
-                e.preventDefault();
-                scrollToId("#tools");
-              }}
-              className="text-neutral-300 hover:text-neutral-100"
-            >
-              Outils
-            </a>
-            <a
-              href="#faq"
-              onClick={(e) => {
-                e.preventDefault();
-                scrollToId("#faq");
-              }}
-              className="text-neutral-300 hover:text-neutral-100"
-            >
-              FAQ
-            </a>
-            <span className="px-2 py-1 text-[11px] rounded-full border border-white/10 text-neutral-300 bg-neutral-800/60">
-              Bêta v1.0.0
-            </span>
-            {liveCount > 0 && (
-              <span className="ml-2 inline-flex items-center gap-2 text-xs px-3 py-1 rounded-full bg-rose-600/20 text-rose-200 border border-rose-400/20">
-                <span className="h-2 w-2 rounded-full bg-rose-400 animate-ping" />
-                {liveCount} match{liveCount > 1 ? "s" : ""} en LIVE
-              </span>
-            )}
-            <button
-              onClick={() => setShowPwd(true)}
-              title="Espace développeur"
-              className="ml-2 px-3 py-1 rounded-xl bg-neutral-900/80 border border-white/10 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800"
-            >
-              ⚙️
-            </button>
+            </p>
+            <h1 className="mt-2 text-3xl font-bold text-white sm:text-4xl">
+              9 pronostics IA du jour
+            </h1>
+            <p className="mt-4 text-base text-neutral-300">
+              Analyse automatique pour 3 matchs de football, 3 rencontres de tennis
+              et 3 affiches de basket. Probabilités et cote simulée calculées à partir
+              de statistiques récentes.
+            </p>
           </div>
-        </div>
-
-        {/* Hero */}
-        <Hero onSeeToday={onSeeToday} onFilterSport={onFilterSport} stats={stats} isScrolling={isScrolling} />
-
-        {/* Filtre actif */}
-        {filterSport && (
-          <div className="mt-6 flex items-center gap-3">
-            <Badge tone="green">Filtre: {filterSport}</Badge>
+          <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
             <button
-              onClick={clearFilter}
-              className="text-xs text-neutral-400 hover:text-neutral-200 underline"
+              type="button"
+              onClick={fetchPicks}
+              className="inline-flex items-center gap-2 rounded-full border border-emerald-400/40 bg-emerald-500/10 px-5 py-2 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/20"
             >
-              Réinitialiser
+              Rafraîchir les pronostics
             </button>
+            {loading && <span className="text-sm text-neutral-400">Chargement…</span>}
+            {error && (
+              <span className="text-sm text-rose-300">{error}</span>
+            )}
+          </div>
+        </header>
+
+        {SPORTS_ORDER.map((sport) => {
+          const picksForSport = grouped[sport] ?? [];
+          if (picksForSport.length === 0) {
+            return null;
+          }
+          return (
+            <section key={sport} className="space-y-5">
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-semibold text-white">{sport}</h2>
+                <span className="text-sm text-neutral-400">
+                  {picksForSport.length} pronostics
+                </span>
+              </div>
+              <div className="grid gap-5 md:grid-cols-2">
+                {picksForSport.map((pick) => (
+                  <PickCard key={pick.id} pick={pick} />
+                ))}
+              </div>
+            </section>
+          );
+        })}
+
+        {!loading && picks.length === 0 && !error && (
+          <div className="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-6 text-center text-sm text-yellow-100">
+            Aucun pronostic disponible pour le moment. Réessaie un peu plus tard.
           </div>
         )}
-
-        {/* Daily picks */}
-        <div id="pronos" className="mt-10 space-y-10">
-          <DailyPicks picks={picks} filterSport={filterSport} now={now} />
-        </div>
-
-        {/* Yesterday */}
-        <div id="yesterday" className="mt-10">
-          <Yesterday picks={picks} now={now} />
-        </div>
-
-        {/* Tools */}
-        <div id="tools" className="mt-10">
-          <Tools />
-        </div>
-
-        {/* Newsletter */}
-        <div id="newsletter" className="mt-10">
-          <Newsletter />
-        </div>
-
-        {/* FAQ */}
-        <div id="faq" className="mt-10">
-          <FAQ />
-        </div>
-
-<Footer
-  onOpenPrivacy={() => setLegalModal('privacy')}
-  onOpenLegal={() => setLegalModal('legal')}
-  onOpenCGU={() => setLegalModal('terms')}
-  onOpenContact={() => setLegalModal('contact')}
-/>
-
-      </div>
-
-      {/* Modales légales */}
-<SimpleModal
-  open={legalModal === "privacy"}
-  title="Politique de confidentialité"
-  onClose={() => setLegalModal(null)}
->
-  <p className="text-neutral-400">Dernière mise à jour : 17/09/2025</p>
-
-  <p>
-    La présente Politique de Confidentialité décrit la manière dont <b>PronoAI.com</b> collecte,
-    utilise et protège les informations personnelles de ses utilisateurs.
-  </p>
-
-  <h3 className="text-neutral-100 font-medium">1. Collecte des données</h3>
-  <ul className="list-disc pl-5 space-y-1">
-    <li>Adresse e-mail (newsletter ou compte utilisateur)</li>
-    <li>Données de navigation (cookies, analytics)</li>
-  </ul>
-  <p>Aucune donnée sensible n’est collectée par défaut.</p>
-
-  <h3 className="text-neutral-100 font-medium">2. Utilisation des données</h3>
-  <ul className="list-disc pl-5 space-y-1">
-    <li>Envoi de newsletters</li>
-    <li>Amélioration de l’expérience utilisateur</li>
-    <li>Affichage de publicités adaptées</li>
-  </ul>
-
-  <h3 className="text-neutral-100 font-medium">3. Partage des données</h3>
-  <p>Jamais revendues. Transmises seulement aux prestataires techniques nécessaires (hébergeur, emailing).</p>
-
-  <h3 className="text-neutral-100 font-medium">4. Cookies</h3>
-  <p>Utilisés pour navigation, audience et publicité ciblée.</p>
-
-  <h3 className="text-neutral-100 font-medium">5. Sécurité</h3>
-  <p>Mesures techniques mises en place pour protéger vos données.</p>
-
-  <h3 className="text-neutral-100 font-medium">6. Droits RGPD</h3>
-  <p>
-    Vous disposez d’un droit d’accès, de modification, de suppression et de portabilité.
-    Contactez-nous à <a className="underline" href="mailto:contact@pronoai.com">contact@pronoai.com</a>.
-  </p>
-
-  <h3 className="text-neutral-100 font-medium">7. Conservation</h3>
-  <p>Les données sont supprimées ou anonymisées après utilisation.</p>
-
-  <h3 className="text-neutral-100 font-medium">8. Modification</h3>
-  <p>PronoAI.com peut modifier cette politique à tout moment (notification en cas de changement majeur).</p>
-</SimpleModal>
-      <SimpleModal
-  open={legalModal === "legal"}
-  title="Mentions légales"
-  onClose={() => setLegalModal(null)}
->
-  <p className="text-neutral-400">Dernière mise à jour : 17/09/2025</p>
-
-  <h3 className="text-neutral-100 font-medium">1. Éditeur du site</h3>
-  <p>
-    PronoAI.com est édité par un particulier.<br />
-    📩 Contact : <a className="underline" href="mailto:contact@pronoai.com">contact@pronoai.com</a>
-  </p>
-  <p className="text-neutral-400">
-    (Coordonnées personnelles non publiées, disponibles uniquement pour les autorités compétentes via l’hébergeur.)
-  </p>
-
-  <h3 className="text-neutral-100 font-medium">2. Hébergeur</h3>
-  <p>
-    Vercel Inc., 440 N Barranca Ave #4133, Covina, CA 91723, États-Unis<br />
-    🌐 <a className="underline" href="https://vercel.com" target="_blank" rel="noreferrer">vercel.com</a>
-  </p>
-
-  <h3 className="text-neutral-100 font-medium">3. Propriété intellectuelle</h3>
-  <p>
-    Le contenu du site est protégé par la loi. Toute reproduction non autorisée est interdite.
-  </p>
-
-  <h3 className="text-neutral-100 font-medium">4. Responsabilité</h3>
-  <p>
-    Les informations sont fournies à titre informatif. Aucune garantie de gain. L’utilisateur doit être majeur et vérifier
-    la légalité du pari dans son pays.
-  </p>
-</SimpleModal>
-      <SimpleModal
-  open={legalModal === "terms"}
-  title="Conditions générales d’utilisation"
-  onClose={() => setLegalModal(null)}
->
-  <p className="text-neutral-400">Dernière mise à jour : 17/09/2025</p>
-  <p>
-    En utilisant PronoAI.com, vous acceptez les présentes Conditions Générales d’Utilisation (CGU).
-  </p>
-
-  <ul className="list-disc pl-5 space-y-2">
-    <li>Site gratuit. Certaines fonctions peuvent être réservées aux inscrits.</li>
-    <li>Les contenus sont informatifs et ludiques, sans garantie.</li>
-    <li>Les paris comportent des risques financiers.</li>
-    <li>PronoAI décline toute responsabilité en cas de perte.</li>
-    <li>L’utilisateur doit être majeur et respecter sa législation locale.</li>
-  </ul>
-</SimpleModal>
-      <SimpleModal
-  open={legalModal === "contact"}
-  title="Contact"
-  onClose={() => setLegalModal(null)}
->
-  <p>
-    Vous pouvez nous écrire à : <a className="underline" href="mailto:contact@pronoai.com">contact@pronoai.com</a>
-  </p>
-</SimpleModal>
-
-      {/* Modale anti-adblock */}
-      <AdblockModal open={adblock} onClose={() => setAdblock(false)} />
-
-      {/* Admin */}
-      {showAdmin && (
-        <AdminPanel
-          onClose={() => setShowAdmin(false)}
-          picks={picks}
-          setPicks={setPicks}
-          onToast={(m, k) => pushToast(m, k)}
-        />
-      )}
-      {showPwd && <PasswordModal onClose={() => setShowPwd(false)} onSuccess={() => setShowAdmin(true)} />}
-
-      {/* Toasts */}
-      <Toasts toasts={toasts} onClose={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
-
-      {/* Tests */}
-      <DevTests />
-    </div>
+      </section>
+    </main>
   );
 }
-
-export default PronoAIApp;
