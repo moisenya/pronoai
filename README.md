@@ -16,9 +16,17 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+### Configurer l'IA Gemini pour les analyses
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Les analyses textuelles des pronostics sont enrichies via l'API Google Gemini. Pour activer cette intégration, ajoutez la clé dans votre environnement :
+
+```bash
+export GEMINI_API_KEY="votre_cle_secrete"
+# Optionnel : choisir un autre modèle supporté
+export GEMINI_MODEL="gemini-1.5-flash"
+```
+
+Sans clé valide, l'application conserve automatiquement les analyses internes prévues par le moteur de règles.
 
 ## Learn More
 

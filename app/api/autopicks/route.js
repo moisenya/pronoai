@@ -3,7 +3,7 @@ import { generateAutoPicks } from "../../../lib/predictionEngine";
 
 export async function GET() {
   try {
-    const picks = generateAutoPicks();
+    const picks = await generateAutoPicks();
     return NextResponse.json({ picks });
   } catch (error) {
     return NextResponse.json(
