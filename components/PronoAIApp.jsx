@@ -52,6 +52,15 @@ function PickCard({ pick }) {
     ? pick.marketImpliedProbability
     : null;
   const marketProvider = pick.marketProvider?.trim?.();
+  const providersList = Array.isArray(pick.marketProviders)
+    ? pick.marketProviders.map((name) => name.trim()).filter(Boolean).join(", ")
+    : marketProvider;
+  const marketRangeMin = Number.isFinite(pick.marketRange?.min) ? pick.marketRange.min : null;
+  const marketRangeMax = Number.isFinite(pick.marketRange?.max) ? pick.marketRange.max : null;
+  const edgeDisplay = Number.isFinite(pick.edge) ? `${pick.edge.toFixed(1)}%` : "—";
+  const flags = Array.isArray(pick.flags) ? pick.flags : [];
+  const signals = Array.isArray(pick.signals) ? pick.signals : [];
+  const bookCount = Array.isArray(pick.marketProviders) ? pick.marketProviders.length : null;
 
   return (
     <article className="rounded-2xl border border-emerald-500/20 bg-neutral-950/80 p-5 shadow-lg">
@@ -96,11 +105,45 @@ function PickCard({ pick }) {
             <dd>
               {marketOdds.toFixed(2)}
               {marketProbability ? ` (~${marketProbability}%)` : ""}
-              {marketProvider ? ` · ${marketProvider}` : ""}
+              {marketRangeMin !== null && marketRangeMax !== null
+                ? ` · plage ${marketRangeMin.toFixed(2)}-${marketRangeMax.toFixed(2)}`
+                : ""}
+              {providersList ? ` · ${providersList}` : ""}
             </dd>
           </div>
         )}
+        <div>
+          <dt className="text-neutral-500">Edge modèle</dt>
+          <dd>{edgeDisplay}</dd>
+        </div>
+        {bookCount !== null && (
+          <div>
+            <dt className="text-neutral-500">Books agrégés</dt>
+            <dd>{bookCount}</dd>
+          </div>
+        )}
       </dl>
+      {signals.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2 text-xs text-emerald-200">
+          {signals.map((signal) => (
+            <span key={signal} className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-1">
+              {signal}
+            </span>
+          ))}
+        </div>
+      )}
+      {flags.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2 text-xs text-yellow-200">
+          {flags.map((flag, index) => (
+            <span
+              key={`${flag}-${index}`}
+              className="rounded-full border border-yellow-400/40 bg-yellow-500/10 px-2 py-1"
+            >
+              {flag}
+            </span>
+          ))}
+        </div>
+      )}
       <p className="mt-4 text-sm leading-relaxed text-neutral-300">{pick.analysis}</p>
     </article>
   );
@@ -110,6 +153,9 @@ export default function PronoAIApp() {
   const [picks, setPicks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [summary, setSummary] = useState(null);
+  const [meta, setMeta] = useState(null);
+  const [fallback, setFallback] = useState(false);
 
   const fetchPicks = useCallback(async () => {
     try {
@@ -121,9 +167,15 @@ export default function PronoAIApp() {
       }
       const payload = await response.json();
       setPicks(Array.isArray(payload.picks) ? payload.picks : []);
+      setSummary(payload.summary ?? null);
+      setMeta(payload.meta ?? null);
+      setFallback(Boolean(payload.fallback));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur inconnue");
       setPicks([]);
+      setSummary(null);
+      setMeta(null);
+      setFallback(false);
     } finally {
       setLoading(false);
     }
@@ -134,6 +186,13 @@ export default function PronoAIApp() {
   }, [fetchPicks]);
 
   const grouped = useMemo(() => groupBySport(picks), [picks]);
+  const summaryEntries = useMemo(() => {
+    if (!summary || typeof summary !== "object") return [];
+    return SPORTS_ORDER.map((sport) => ({ sport, data: summary[sport] ?? null })).filter(
+      (entry) => entry.data
+    );
+  }, [summary]);
+  const totalPicks = picks.length;
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-neutral-950 via-neutral-900 to-black px-4 py-10 text-neutral-100">
@@ -144,12 +203,16 @@ export default function PronoAIApp() {
               PronoAI
             </p>
             <h1 className="mt-2 text-3xl font-bold text-white sm:text-4xl">
-              9 pronostics IA du jour
+              Pronostics IA du jour
             </h1>
             <p className="mt-4 text-base text-neutral-300">
-              Analyse automatique pour 3 matchs de football, 3 rencontres de tennis
-              et 3 affiches de basket. Probabilités et cote simulée calculées à partir
-              de statistiques récentes.
+              {meta?.dateLabel ? `Fenêtre ${meta.dateLabel} (${meta.windowLabel ?? ""})` : "Fenêtre du jour"}.{" "}
+              {fallback
+                ? "Mode secours activé : analyse interne affichée."
+                : "Analyse automatique multi-sources avec consolidation marché."}
+            </p>
+            <p className="text-sm text-neutral-400">
+              {totalPicks} pronostic{totalPicks > 1 ? "s" : ""} généré{totalPicks > 1 ? "s" : ""}
             </p>
           </div>
           <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
@@ -166,6 +229,68 @@ export default function PronoAIApp() {
             )}
           </div>
         </header>
+
+        {summaryEntries.length > 0 && (
+          <section className="rounded-3xl border border-emerald-500/20 bg-neutral-950/60 p-6 shadow-lg">
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-white">Slate summary</h2>
+                <p className="text-sm text-neutral-400">
+                  Sources croisées (ESPN + SofaScore) · Fenêtre {meta?.windowLabel ?? "Europe/Brussels"}
+                </p>
+              </div>
+              {fallback && (
+                <span className="rounded-full border border-yellow-400/40 bg-yellow-500/10 px-3 py-1 text-xs font-medium text-yellow-100">
+                  Mode fallback
+                </span>
+              )}
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              {summaryEntries.map(({ sport, data }) => (
+                <div key={sport} className="rounded-2xl border border-emerald-500/20 bg-neutral-950/80 p-4">
+                  <h3 className="text-lg font-semibold text-white">{sport}</h3>
+                  <dl className="mt-3 space-y-1 text-sm text-neutral-300">
+                    <div className="flex justify-between">
+                      <dt>Total listés</dt>
+                      <dd>{data.totalListed ?? 0}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt>Confirmés</dt>
+                      <dd>{data.confirmed ?? 0}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt>Analysés</dt>
+                      <dd>{data.analysed ?? 0}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt>Candidats</dt>
+                      <dd>{data.candidates ?? 0}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt>Picks retenus</dt>
+                      <dd>{data.selected ?? 0}</dd>
+                    </div>
+                  </dl>
+                  {data.coverageNote && (
+                    <p className="mt-3 text-xs text-neutral-400">{data.coverageNote}</p>
+                  )}
+                  {Array.isArray(data.highProfileExcluded) && data.highProfileExcluded.length > 0 && (
+                    <div className="mt-3 space-y-1 text-xs text-neutral-400">
+                      <p className="font-medium text-neutral-300">High-profile écartés :</p>
+                      <ul className="space-y-1">
+                        {data.highProfileExcluded.map((item, index) => (
+                          <li key={`${item.match}-${index}`} className="list-disc pl-4">
+                            {item.match} ({item.league}) — {item.reason}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {SPORTS_ORDER.map((sport) => {
           const picksForSport = grouped[sport] ?? [];

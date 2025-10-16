@@ -5,8 +5,8 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const picks = await generateAutoPicks();
-    return NextResponse.json({ picks });
+    const result = await generateAutoPicks();
+    return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(
       { error: error?.message ?? "Erreur inconnue" },

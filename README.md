@@ -40,6 +40,13 @@ chaque requête sur `/api/autopicks`, l'application :
 - récupère les cotes moneyline fournies par ESPN lorsqu'elles existent, pour comparer marché et modèle ;
 - fait appel à Gemini (si activé) pour reformuler l'analyse textuelle.
 
+Depuis cette mise à jour, la génération :
+
+- recoupe chaque match entre ESPN et SofaScore (fenêtre Europe/Brussels du jour ±6h) avant de le considérer ;
+- calcule des médianes de cotes à partir d'au moins trois bookmakers et marque « ⚠️ re-check » en cas de dispersion >8 % ;
+- n'ajoute un pick que si l'edge modèle/implicite respecte les seuils (8 % foot/basket, 10 % tennis) et si deux signaux indépendants sont présents ;
+- synthétise la couverture du slate dans l'interface (matches listés, confirmés, candidats, picks retenus, matches high-profile écartés).
+
 Les rencontres sont filtrées pour ne conserver que les affiches à venir dans les 96 prochaines heures, avec rejet des matchs déjà démarrés. L'interface affiche la cote simulée, la cote de marché (si disponible) et l'analyse enrichie.
 
 L'accès réseau sortant doit donc être autorisé pour récupérer des rencontres réellement programmées. En cas d'indisponibilité
