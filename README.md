@@ -30,6 +30,18 @@ Sans définir `GEMINI_MODEL`, l'application utilise par défaut `gemini-2.5-flas
 
 Sans clé valide, l'application conserve automatiquement les analyses internes prévues par le moteur de règles.
 
+### Données de matchs en direct
+
+Le moteur génère désormais les 9 pronostics à partir des tableaux de bord publics d'ESPN (football, tennis, basket). Lors de
+chaque requête sur `/api/autopicks`, l'application :
+
+- interroge les endpoints `scoreboard` des compétitions majeures sur les 4 prochains jours ;
+- calcule des probabilités et une cote simulée à partir des bilans/rangs/formes disponibles ;
+- fait appel à Gemini (si activé) pour reformuler l'analyse textuelle.
+
+L'accès réseau sortant doit donc être autorisé pour récupérer des rencontres réellement programmées. En cas d'indisponibilité
+des flux, un jeu de neuf rencontres de secours est renvoyé automatiquement pour garantir une réponse exploitable.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
