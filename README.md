@@ -37,7 +37,10 @@ chaque requête sur `/api/autopicks`, l'application :
 
 - interroge les endpoints `scoreboard` des compétitions majeures sur les 4 prochains jours ;
 - calcule des probabilités et une cote simulée à partir des bilans/rangs/formes disponibles ;
+- récupère les cotes moneyline fournies par ESPN lorsqu'elles existent, pour comparer marché et modèle ;
 - fait appel à Gemini (si activé) pour reformuler l'analyse textuelle.
+
+Les rencontres sont filtrées pour ne conserver que les affiches à venir dans les 96 prochaines heures, avec rejet des matchs déjà démarrés. L'interface affiche la cote simulée, la cote de marché (si disponible) et l'analyse enrichie.
 
 L'accès réseau sortant doit donc être autorisé pour récupérer des rencontres réellement programmées. En cas d'indisponibilité
 des flux, un jeu de neuf rencontres de secours est renvoyé automatiquement pour garantir une réponse exploitable.

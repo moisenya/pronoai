@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateAutoPicks } from "../../../lib/predictionEngine";
+import { generateAutoPicks } from "../../../lib/predictionEngine.js";
 
 export const dynamic = "force-dynamic";
 

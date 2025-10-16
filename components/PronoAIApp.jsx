@@ -46,6 +46,12 @@ function PickCard({ pick }) {
   const badgeStyles = isGemini
     ? "border-cyan-400/30 bg-cyan-500/10 text-cyan-100"
     : "border-neutral-500/30 bg-neutral-500/10 text-neutral-200";
+  const modelOdds = Number.isFinite(pick.odds) ? pick.odds : null;
+  const marketOdds = Number.isFinite(pick.marketOdds) ? pick.marketOdds : null;
+  const marketProbability = Number.isFinite(pick.marketImpliedProbability)
+    ? pick.marketImpliedProbability
+    : null;
+  const marketProvider = pick.marketProvider?.trim?.();
 
   return (
     <article className="rounded-2xl border border-emerald-500/20 bg-neutral-950/80 p-5 shadow-lg">
@@ -82,8 +88,18 @@ function PickCard({ pick }) {
         </div>
         <div>
           <dt className="text-neutral-500">Cote simulée</dt>
-          <dd>{pick.odds.toFixed(2)}</dd>
+          <dd>{modelOdds !== null ? modelOdds.toFixed(2) : "—"}</dd>
         </div>
+        {marketOdds !== null && (
+          <div>
+            <dt className="text-neutral-500">Cote marché</dt>
+            <dd>
+              {marketOdds.toFixed(2)}
+              {marketProbability ? ` (~${marketProbability}%)` : ""}
+              {marketProvider ? ` · ${marketProvider}` : ""}
+            </dd>
+          </div>
+        )}
       </dl>
       <p className="mt-4 text-sm leading-relaxed text-neutral-300">{pick.analysis}</p>
     </article>
