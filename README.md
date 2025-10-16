@@ -23,8 +23,10 @@ Les analyses textuelles des pronostics sont enrichies via l'API Google Gemini. P
 ```bash
 export GEMINI_API_KEY="votre_cle_secrete"
 # Optionnel : choisir un autre modèle supporté
-export GEMINI_MODEL="gemini-1.5-flash"
+export GEMINI_MODEL="gemini-2.5-flash"
 ```
+
+Sans définir `GEMINI_MODEL`, l'application utilise par défaut `gemini-2.5-flash`.
 
 Sans clé valide, l'application conserve automatiquement les analyses internes prévues par le moteur de règles.
 

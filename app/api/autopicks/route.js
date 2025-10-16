@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { generateAutoPicks } from "../../../lib/predictionEngine";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const picks = await generateAutoPicks();

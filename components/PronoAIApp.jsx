@@ -12,6 +12,17 @@ function groupBySport(picks) {
   }, {});
 }
 
+function formatModelName(model) {
+  if (typeof model !== "string" || model.trim().length === 0) {
+    return null;
+  }
+  const formatted = model
+    .replace(/^gemini/i, "Gemini")
+    .replace(/-/g, " ")
+    .replace(/\b([a-z])/g, (match) => match.toUpperCase());
+  return formatted;
+}
+
 function formatKickoff(iso) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "À confirmer";
@@ -25,6 +36,17 @@ function formatKickoff(iso) {
 }
 
 function PickCard({ pick }) {
+  const isGemini = pick.analysisSource === "gemini";
+  const formattedModel = formatModelName(pick.analysisModel);
+  const badgeLabel = isGemini
+    ? formattedModel
+      ? `Analyse ${formattedModel}`
+      : "Analyse Gemini"
+    : "Analyse interne";
+  const badgeStyles = isGemini
+    ? "border-cyan-400/30 bg-cyan-500/10 text-cyan-100"
+    : "border-neutral-500/30 bg-neutral-500/10 text-neutral-200";
+
   return (
     <article className="rounded-2xl border border-emerald-500/20 bg-neutral-950/80 p-5 shadow-lg">
       <header className="mb-2 flex items-start justify-between gap-3">
@@ -34,9 +56,16 @@ function PickCard({ pick }) {
           </p>
           <h3 className="mt-1 text-lg font-semibold text-white">{pick.match}</h3>
         </div>
-        <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-sm font-medium text-emerald-200">
-          {pick.confidence}%
-        </span>
+        <div className="flex flex-col items-end gap-2">
+          <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-sm font-medium text-emerald-200">
+            {pick.confidence}%
+          </span>
+          <span
+            className={`rounded-full border px-3 py-1 text-xs font-medium uppercase tracking-wide ${badgeStyles}`}
+          >
+            {badgeLabel}
+          </span>
+        </div>
       </header>
       <dl className="grid grid-cols-2 gap-2 text-sm text-neutral-300">
         <div>
