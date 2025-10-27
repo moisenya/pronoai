@@ -16,9 +16,41 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+### Configurer l'IA Gemini pour les analyses
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Les analyses textuelles des pronostics sont enrichies via l'API Google Gemini. Pour activer cette intégration, ajoutez la clé dans votre environnement :
+
+```bash
+export GEMINI_API_KEY="votre_cle_secrete"
+# Optionnel : choisir un autre modèle supporté
+export GEMINI_MODEL="gemini-2.5-flash"
+```
+
+Sans définir `GEMINI_MODEL`, l'application utilise par défaut `gemini-2.5-flash`.
+
+Sans clé valide, l'application conserve automatiquement les analyses internes prévues par le moteur de règles.
+
+### Données de matchs en direct
+
+Le moteur génère désormais les 9 pronostics à partir des tableaux de bord publics d'ESPN (football, tennis, basket). Lors de
+chaque requête sur `/api/autopicks`, l'application :
+
+- interroge les endpoints `scoreboard` des compétitions majeures sur les 4 prochains jours ;
+- calcule des probabilités et une cote simulée à partir des bilans/rangs/formes disponibles ;
+- récupère les cotes moneyline fournies par ESPN lorsqu'elles existent, pour comparer marché et modèle ;
+- fait appel à Gemini (si activé) pour reformuler l'analyse textuelle.
+
+Depuis cette mise à jour, la génération :
+
+- recoupe chaque match entre ESPN et SofaScore (fenêtre Europe/Brussels du jour ±6h) avant de le considérer ;
+- calcule des médianes de cotes à partir d'au moins trois bookmakers et marque « ⚠️ re-check » en cas de dispersion >8 % ;
+- n'ajoute un pick que si l'edge modèle/implicite respecte les seuils (8 % foot/basket, 10 % tennis) et si deux signaux indépendants sont présents ;
+- synthétise la couverture du slate dans l'interface (matches listés, confirmés, candidats, picks retenus, matches high-profile écartés).
+
+Les rencontres sont filtrées pour ne conserver que les affiches à venir dans les 96 prochaines heures, avec rejet des matchs déjà démarrés. L'interface affiche la cote simulée, la cote de marché (si disponible) et l'analyse enrichie.
+
+L'accès réseau sortant doit donc être autorisé pour récupérer des rencontres réellement programmées. En cas d'indisponibilité
+des flux, un jeu de neuf rencontres de secours est renvoyé automatiquement pour garantir une réponse exploitable.
 
 ## Learn More
 
